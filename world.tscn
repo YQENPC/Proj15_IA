@@ -1,0 +1,143 @@
+[gd_scene format=4 uid="uid://bo5oy87upg3o6"]
+
+[ext_resource type="Script" uid="uid://dtdvphg4afov3" path="res://world.gd" id="1_tlwt5"]
+[ext_resource type="PackedScene" uid="uid://cn178iea1iglt" path="res://sprite_2d.tscn" id="2_aqk2v"]
+[ext_resource type="Shader" uid="uid://55ax5b1qht3u" path="res://overlay.gdshader" id="3_aqk2v"]
+[ext_resource type="Texture2D" uid="uid://tnfn4p86e1fs" path="res://spritesheet-v1.png" id="4_aqk2v"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_036b0"]
+shader = ExtResource("3_aqk2v")
+shader_parameter/opacity = 0.5050000239875
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_aqk2v"]
+texture = ExtResource("4_aqk2v")
+texture_region_size = Vector2i(84, 84)
+0:0/0 = 0
+0:0/0/texture_origin = Vector2i(0, 24)
+1:0/0 = 0
+1:0/0/texture_origin = Vector2i(0, 24)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, 24)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, 24)
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_aqk2v"]
+tile_shape = 1
+tile_size = Vector2i(84, 48)
+sources/0 = SubResource("TileSetAtlasSource_aqk2v")
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_dwbse"]
+texture = ExtResource("4_aqk2v")
+texture_region_size = Vector2i(84, 84)
+3:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_pkg7o"]
+tile_shape = 1
+tile_size = Vector2i(84, 48)
+sources/0 = SubResource("TileSetAtlasSource_dwbse")
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_pkg7o"]
+texture = ExtResource("4_aqk2v")
+texture_region_size = Vector2i(84, 84)
+1:0/0 = 0
+1:0/0/texture_origin = Vector2i(0, 24)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, 24)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, 24)
+4:1/0 = 0
+3:1/0 = 0
+2:1/0 = 0
+1:1/0 = 0
+0:1/0 = 0
+0:0/0 = 0
+0:0/0/texture_origin = Vector2i(0, 24)
+
+[sub_resource type="TileSet" id="TileSet_gbfbk"]
+tile_shape = 1
+tile_size = Vector2i(84, 48)
+sources/0 = SubResource("TileSetAtlasSource_pkg7o")
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_aqk2v"]
+atlas = ExtResource("4_aqk2v")
+region = Rect2(0, 0, 84, 84)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_036b0"]
+atlas = ExtResource("4_aqk2v")
+region = Rect2(168, 0, 84, 84)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_dwbse"]
+atlas = ExtResource("4_aqk2v")
+region = Rect2(252, 0, 84, 84)
+
+[node name="World" type="Node2D" unique_id=450098406]
+script = ExtResource("1_tlwt5")
+
+[node name="Sprite2D" parent="." unique_id=574174352 instance=ExtResource("2_aqk2v")]
+visible = false
+position = Vector2(554, 303)
+
+[node name="city_builder" type="Node" parent="." unique_id=1862528029]
+
+[node name="overlay" type="TileMapLayer" parent="city_builder" unique_id=1741774294]
+z_index = 2
+y_sort_enabled = true
+material = SubResource("ShaderMaterial_036b0")
+position = Vector2(640, 360)
+tile_set = SubResource("TileSet_aqk2v")
+
+[node name="terrain" type="TileMapLayer" parent="city_builder" unique_id=982303609]
+y_sort_enabled = true
+position = Vector2(640, 360)
+tile_map_data = PackedByteArray("AAD8//n/AAAAAAEAAAD8//v/AAAAAAEAAAD8//3/AAAAAAEAAAD8////AAADAAEAAAD8/wEAAAAAAAEAAAD8/wMAAAAAAAEAAAD8/wUAAAAAAAEAAAD9//n/AAAAAAEAAAD9//r/AAAAAAEAAAD9//v/AAABAAEAAAD9//z/AAAAAAEAAAD9//3/AAACAAEAAAD9//7/AAACAAEAAAD9////AAACAAEAAAD9/wAAAAAAAAEAAAD9/wEAAAAAAAEAAAD9/wIAAAAAAAEAAAD9/wMAAAAAAAEAAAD9/wQAAAAAAAEAAAD9/wUAAAAAAAEAAAD+//n/AAABAAEAAAD+//r/AAABAAEAAAD+//v/AAAAAAEAAAD+//z/AAABAAEAAAD+//3/AAAAAAEAAAD+//7/AAACAAEAAAD+////AAACAAEAAAD+/wAAAAACAAEAAAD+/wEAAAABAAEAAAD+/wIAAAABAAEAAAD+/wMAAAABAAEAAAD+/wQAAAABAAEAAAD+/wUAAAABAAEAAAD///n/AAAAAAEAAAD///r/AAAAAAEAAAD///v/AAABAAEAAAD///z/AAAAAAEAAAD///3/AAAAAAEAAAD///7/AAAAAAEAAAD/////AAACAAEAAAD//wAAAAACAAEAAAD//wEAAAACAAEAAAD//wIAAAABAAEAAAD//wMAAAABAAEAAAD//wQAAAABAAEAAAD//wUAAAABAAEAAAAAAPn/AAAAAAEAAAAAAPr/AAABAAEAAAAAAPv/AAACAAEAAAAAAPz/AAACAAEAAAAAAP3/AAACAAEAAAAAAP7/AAACAAEAAAAAAP//AAACAAEAAAAAAAAAAAACAAEAAAAAAAEAAAACAAEAAAAAAAIAAAACAAEAAAAAAAMAAAACAAEAAAAAAAQAAAABAAEAAAAAAAUAAAABAAEAAAABAPn/AAAEAAEAAAABAPr/AAACAAEAAAABAPv/AAAAAAEAAAABAPz/AAACAAEAAAABAP3/AAAAAAEAAAABAP7/AAACAAEAAAABAP//AAAAAAEAAAABAAAAAAAAAAEAAAABAAEAAAAAAAEAAAABAAIAAAACAAEAAAABAAMAAAACAAEAAAABAAQAAAACAAEAAAABAAUAAAACAAEAAAACAPn/AAAAAAEAAAACAPr/AAAAAAEAAAACAPv/AAAAAAEAAAACAPz/AAAAAAEAAAACAP3/AAAAAAEAAAACAP7/AAAAAAEAAAACAP//AAAAAAEAAAACAAAAAAAAAAEAAAACAAEAAAAAAAEAAAACAAIAAAAAAAEAAAACAAMAAAAAAAEAAAACAAQAAAACAAEAAAACAAUAAAAEAAEAAAD9/wYAAAAAAAEAAAD+/wYAAAAAAAEAAAD//wYAAAABAAEAAAAAAAYAAAABAAEAAAABAAYAAAABAAEAAAACAAYAAAACAAEAAAA=")
+tile_set = SubResource("TileSet_pkg7o")
+
+[node name="construction" type="TileMapLayer" parent="city_builder" unique_id=978708195]
+z_index = 1
+y_sort_enabled = true
+position = Vector2(640, 360)
+tile_map_data = PackedByteArray("AAD+//r/AAADAAAAAAD9//v/AAADAAAAAAD+//z/AAACAAAAAAD+/wIAAAADAAAAAAD+//n/AAADAAAAAAD+/wEAAAADAAAAAAD//wIAAAADAAAAAAD+/wMAAAADAAAAAAAAAPr/AAABAAAAAAD///v/AAAAAAAAAAAAAAQAAAAAAAAAAAD//wUAAAABAAAAAAAAAAYAAAABAAAAAAAAAAUAAAABAAAAAAA=")
+tile_set = SubResource("TileSet_gbfbk")
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=1806466704]
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI" unique_id=1791293942]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 294.0
+offset_bottom = 137.0
+
+[node name="create_arc" type="Button" parent="UI/VBoxContainer" unique_id=1342713075]
+layout_mode = 2
+text = "Create arc"
+
+[node name="VBoxContainer" type="HBoxContainer" parent="UI/VBoxContainer" unique_id=1655524414]
+layout_mode = 2
+
+[node name="wwtw_main" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=988499394]
+layout_mode = 2
+icon = SubResource("AtlasTexture_aqk2v")
+
+[node name="fwtw_main" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=449443223]
+layout_mode = 2
+icon = SubResource("AtlasTexture_036b0")
+
+[node name="residential_1" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=3783143]
+layout_mode = 2
+icon = SubResource("AtlasTexture_dwbse")
+
+[connection signal="pressed" from="UI/VBoxContainer/create_arc" to="." method="_on_create_arc_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/VBoxContainer/residential_1" to="." method="_on_residential_1_pressed"]
