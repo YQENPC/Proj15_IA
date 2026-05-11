@@ -1,106 +1,368 @@
 extends Node2D
 
+func flatten_array(arr: Array[Array]):
+	var flattened_array: Array = []
+	for sub_arr in arr:
+		for item in sub_arr:
+			flattened_array.append(item)
+	return flattened_array
+
 @onready var TERRAIN_TILEMAP: TileMapLayer = $city_builder/terrain
 @onready var CONSTRUCTION_TILEMAP: TileMapLayer = $city_builder/construction
 @onready var OVERLAY_TILEMAP: TileMapLayer = $city_builder/overlay
+@onready var arcs_tilemaps: Node = $city_builder/arcs_tilemaps # Arcs tilemaps will be placed under this node
 
 const OVERLAY_SHADER_PATH = "res://overlay.gdshader"
 
-var construction_map: Dictionary = {}
-var terrain_map: Dictionary = {}
+var TilesetClass = load("res://tileset.gd") # imports the class Tileset
+var SetClass = load("res://set.gd") # imports the class Set
 
-var constructions_inventory: Dictionary = {}
-var construction_groups: Dictionary = {}
+const INF = 1_000_000_000_000 # represents +infinity
 
-const tiles_to_nodes = {
-	Vector2i(0,0): "wwtw_main",
-	Vector2i(1,0): "wwtw_1",
-	Vector2i(2,0): "fwtw_main",
-	Vector2i(3,0): "residential_1",
-	Vector2i(0,1): "rural",
-	Vector2i(1,1): "urban",
-	Vector2i(2,1): "river",
-	Vector2i(3,1): "catchment",
-	Vector2i(4,1): "outlet"
+var nodes: Dictionary = {}
+
+var arcs: Dictionary = {}
+var arcs_from: Dictionary = {} # node -> array of arcs (arcs going from node)
+var arcs_to: Dictionary = {} # node -> array of arcs (arcs going to node)
+
+var terrain_tile_nodes = {} # cell coords -> terrain node name ("river_xxx" or "urbanLand" or "ruralLand")
+var tile_nodes = {} # cell coords -> node name (e.g. "wwtw_0")
+var terrain_tiles = {} # cell coords -> terrain tile name (e.g. "river", "ruralLand")
+var tiles = {} # cell coords -> tile name (e.g. "wwtw_main")
+
+var tileset = Tileset.new([
+	["wwtw_main", Vector2i(0,0)],
+	["wwtw_0", Vector2i(1,0)],
+	["fwtw_main", Vector2i(2,0)],
+	["residential_1", Vector2i(3,0)],
+	["urbanLand", Vector2i(0,1)],
+	["ruralLand", Vector2i(1,1)],
+	["catchment", Vector2i(2,1)],
+	["outlet", Vector2i(3,1)],
+	["river", Vector2i(4,1)],
+	["arcArrow_(0, -1)", Vector2i(0,2)],
+	["arcArrow_(-1, 0)", Vector2i(1,2)],
+	["arcArrow_(0, 1)", Vector2i(2,2)],
+	["arcArrow_(1, 0)", Vector2i(3,2)],
+	["arcArrow_(1, 0)_(0, -1)", Vector2i(0,3)],
+	["arcArrow_(0, -1)_(1, 0)", Vector2i(1,3)],
+	["arcArrow_(-1, 0)_(0, 1)", Vector2i(2,3)],
+	["arcArrow_(0, 1)_(-1, 0)", Vector2i(3,3)],
+	["arcArrowEnd_(1, 0)", Vector2i(0,4)],
+	["arcArrowEnd_(0, -1)", Vector2i(1,4)],
+	["arcArrowEnd_(-1, 0)", Vector2i(2,4)],
+	["arcArrowEnd_(0, 1)", Vector2i(3,4)],
+	["arcArrowStart_(0, -1)", Vector2i(0,5)],
+	["arcArrowStart_(1, 0)", Vector2i(1,5)],
+	["arcArrowStart_(0, 1)", Vector2i(2,5)],
+	["arcArrowStart_(-1, 0)", Vector2i(3,5)],
+	["arcArrow_(1, 0)_(0, 1)", Vector2i(0,6)],
+	["arcArrow_(0, -1)_(-1, 0)", Vector2i(1,6)],
+	["arcArrow_(0, 1)_(1, 0)", Vector2i(2,6)],
+	["arcArrow_(-1, 0)_(0, -1)", Vector2i(3,6)]
+])
+
+const default_attributes = { # must be intensive values (i.e. per tile values), it's easier that way
+	### Nodes ###
+	"wwtw": {
+		"stormwater_storage_capacity": 2e3,
+		"stormwater_storage_area": 2e3,
+		"treatment_throughput_capacity": 5e3
+	},
+	"fwtw":{
+		"service_reservoir_storage_capacity": 2e3,
+		"service_reservoir_storage_area": 2e3,
+		"treatment_throughput_capacity": 5e3
+	},
+	"residential":{
+		"population": 1e4,
+		"per_capita": 0.15
+	},
+	"ruralLand": {
+		"area": 1e5,
+		"initial_storage": 5e4,
+		"field_capacity": 0.3,
+		"depth": 0.5
+	},
+	"urbanLand": {
+		"area": 1e5,
+		"initial_storage": 5e4
+	},
+	"catchment": {},
+	"outlet": {},
+	
+	### Arcs ###
+	"river_to_fwtw": {
+		"capacity": 5e4
+	}
 }
 
-var nodes_to_tiles = {}
+func find_river_path_dfs(start: Vector2i, goal: Vector2i):
+	var stack = [start] 
+	var parent = {start: null}
+	var visited = {start: true}
+	
+	while stack:
+		var node = stack.pop_back()
+		if node == goal:
+			var path = []
+			var cur = goal
+			while cur != null:
+				path.append(cur)
+				cur = parent[cur]
+			path.reverse()
+			return path
+		for neighbor in TERRAIN_TILEMAP.get_surrounding_cells(node):
+			if neighbor in visited or neighbor not in terrain_tiles:
+				continue
+			if terrain_tiles[neighbor] in ["river", "outlet"] or neighbor == goal:
+				visited[neighbor] = true
+				parent[neighbor] = node
+				stack.append(neighbor)
+	return null
 
-func _init():
-	for key in tiles_to_nodes:
-		nodes_to_tiles[tiles_to_nodes[key]] = key
-
-func reverse_dictionary(original_dict: Dictionary) -> Dictionary:
-	var reversed_dict = {}
-	for key in original_dict.keys():
-		reversed_dict[original_dict[key]] = key
-	return reversed_dict
-
-const default_nodes = {
-	"wwtw_main": ["wwtw_main", 2e3, 2e3, 5e3], # (, stormwater_storage_capacity, stormwater_storage_area, treatment_throughput_capacity)
-	"wwtw_1": ["wwtw_1"], # decorative
-	"fwtw_main": ["fwtw_main", 1e4, 2e3, 5e3], # (, service_reservoir_storage_capacity, service_reservoir_storage_area, treatment_throughput_capacity)
-	"residential_1": ["residential_1", 1e4, 0.15], # (, population, per_capita)
-	"rural": ["rural", 1e5, 5e4, 0.3, 0.5], # (, area, initial_storage, field_capacity, depth)
-	"urban": ["urban", 1e5, 5e4], # (, area, initial_storage)
-	"river": ["river"],
-	"catchment": ["catchment"],
-	"outlet": ["outlet"]
-}
-
-func load_map_from_tilemap(tilemap: TileMapLayer):
-	var used_cells = tilemap.get_used_cells()
-	var map = {}
+func load_terrain_from_default_tilemap():
+	var used_cells = TERRAIN_TILEMAP.get_used_cells()
+	nodes["ruralLand"] = { "tiles": [], "attributes": default_attributes["ruralLand"]}
+	nodes["urbanLand"] = { "tiles": [], "attributes": default_attributes["urbanLand"]}
+	
+	var catchments = []
+	var outlets = []
+	
+	### Land, catchments and outlets ###
+	
 	for cell in used_cells:
-		map[cell] = default_nodes[tiles_to_nodes[tilemap.get_cell_atlas_coords(cell)]]
-	return map
+		var tile_name = tileset.get_tile_name(TERRAIN_TILEMAP.get_cell_atlas_coords(cell))
+		terrain_tiles[cell] = tile_name
+		if tile_name in ["ruralLand", "urbanLand"]:
+			nodes[tile_name]["tiles"].append(cell)
+			terrain_tile_nodes[cell] = tile_name
+		if tile_name == "catchment":
+			var node_name = "catchment_%s" % len(catchments)
+			nodes[node_name] = { "tiles": [cell], "attributes": default_attributes["catchment"] }
+			terrain_tile_nodes[cell] = node_name
+			catchments.append(cell)
+		if tile_name == "outlet":
+			var node_name = "outlet_%s" % len(outlets)
+			nodes[node_name] = { "tiles": [cell], "attributes": default_attributes["outlet"]}
+			terrain_tile_nodes[cell] = node_name
+			outlets.append(cell)
 
-func make_constructions_inventory():
-	# Explore all cells of the construction_map to identify the locations of each building type,
-	# while performing DFS on each unexplored cell to form groups of cells (e.g. a group of
-	# residential tiles next to each other, or a wwtw_main tile with the decorative tiles next to it)
-	# For each group, a node is chosen as the parent of the group
+	### Rivers ###
 	
-	var _constructions_inventory = {}
-	var _construction_groups = {}
-	
-	var visited = {}
-	for cell in construction_map: # TODO : changer ordre de parcours pour que cells avec un nom en "..._main" soient traitées en premier
-		if cell in visited: 
-			continue
-		var tile_group = [cell]
-		var stack = [cell]
-		var cell_type = construction_map[cell][0].split("_")[0]
-		while len(stack) != 0:
-			var cell_ = stack.pop_back()
-			visited[cell_] = true
-			for neighbor in CONSTRUCTION_TILEMAP.get_surrounding_cells(cell_):
-				if neighbor not in construction_map:
-					continue
-				var neighbor_type = construction_map[neighbor][0].split("_")[0]
-				if neighbor not in visited and neighbor_type == cell_type:
-					visited[neighbor] = true
-					tile_group.append(neighbor)
-					_construction_groups[neighbor] = cell
-					stack.append(neighbor)
-		if cell_type not in _constructions_inventory:
-			_constructions_inventory[cell_type] = []
-		_constructions_inventory[cell_type].append(tile_group)
-		_construction_groups[cell] = tile_group
-	
-	return [_constructions_inventory, _construction_groups]
+	# 1. Selecting the tiles that will act as actual river nodes
+	var rivers = []
+	var remaining_catchments = catchments.duplicate()
+	while len(remaining_catchments) != 0:
+		var catchment = remaining_catchments.pop_front()
+		
+		var river: Array[Array] = []
+		for outlet in outlets: # Find all the outlets where the river starting from catchment goes to
+			var path = find_river_path_dfs(catchment, outlet)
+			if path != null:
+				if len(river) == 0: # first path found between a catchment and an outlet
+					river.append(path)
+				else: # make a junction with the first path found
+					var shortest_path = null
+					var shortest_length = INF
+					var river_tiles_without_boundaries = Set.new(flatten_array(river)) \
+						.difference(Set.new(catchments + outlets)).elements()
+					for tile in river_tiles_without_boundaries:
+						var path_ = find_river_path_dfs(tile, outlet)
+						if len(path_) < shortest_length:
+							shortest_path = path_
+							shortest_length = len(path_)
+					river.append(shortest_path)
+		if (len(river) == 0): print("Catchment is not connected to any outlet") # TODO : Popup d'erreur
+		for catchment_ in catchments:
+			var path = find_river_path_dfs(catchment, river[0][-1])
+			if path != null:
+				var shortest_path = null
+				var shortest_length = INF
+				var river_tiles_without_boundaries = Set.new(flatten_array(river)) \
+					.difference(Set.new(catchments + outlets)).elements()
+				for tile in river_tiles_without_boundaries:
+					var path_ = find_river_path_dfs(catchment_, tile)
+					if len(path_) < shortest_length:
+						shortest_path = path_
+						shortest_length = len(path_)
+					river.append(shortest_path)
+					remaining_catchments.erase(catchment_)
+		
+		var r = len(rivers)
+		for b in range(len(river)):
+			var branch = river[b]
+			for n in range(len(branch)):
+				var node = branch[n]
+				var node_name = "river_%s_%s_%s" % [r, b, n]
+				nodes[node_name] = { "tiles": [node] }
+				terrain_tile_nodes[node] = node_name
+				
+				# TODO: create arcs (temporary arcs, will be simplified before exporting to python)
+		
+		rivers.append(river)
+		
+		# 2. Connect decorative tile nodes
+		
+		# Before connecting the decorative river nodes to the actual river nodes, we sort the nodes by their distance to
+		# the outlet of their branch (or the outlet of the branch their branch point to), so that if a decorative river
+		# node is at the same distance from two actual river nodes, it is connected to the one which is furthest downstream.
+		var distances = {}
+		for branch in river:
+			if branch[-1] in outlets:
+				for i in range(branch.size() - 1, -1, -1):
+					var node = branch[i]
+					distances[node] = i
+			else: # means there is a junction, the branch connects to the main path river[0]
+				for i in range(branch.size() - 1, -1, -1):
+					var node = branch[i]
+					var river_reversed = river[0].duplicate()
+					river_reversed.reverse()
+					distances[node] = i + river_reversed.find(branch[-1])
+		
+		var river_nodes = Set.new(flatten_array(river))
+		#for node in river_nodes.elements():
+			#OVERLAY_TILEMAP.set_cell(node, 0, Vector2i(0,1))
+		
+		# We perform a dfs to connect all the decorative river nodes
+		# We exclude catchments since we do not want decorative river nodes to be connected to catchments
+		var a_parcourir = river_nodes.difference(Set.new(catchments)).elements()
+		var distance_sort = func(a, b) -> bool:
+			return distances[a] < distances[b]
+		a_parcourir.sort_custom(distance_sort)
+		var connected = {}
+		for node in river_nodes.elements():
+			connected[node] = true
+			
+		while len(a_parcourir) != 0:
+			var node = a_parcourir.pop_front()
+			var unconnected_river_neighbors = []
+			for neighbor in TERRAIN_TILEMAP.get_surrounding_cells(node):
+				if not (neighbor in connected) and tileset.get_tile_name(TERRAIN_TILEMAP.get_cell_atlas_coords(neighbor)) == "river":
+					unconnected_river_neighbors.append(neighbor)
+			for neighbor in unconnected_river_neighbors:
+				terrain_tile_nodes[neighbor] = terrain_tile_nodes[node]
+				connected[neighbor] = true
+				a_parcourir.append(neighbor)
 
-func map_to_model():
-	# var rural_area = ...
-	# var urban_area = ...
+func add_building(coords: Vector2i, tile_name: String):
+	CONSTRUCTION_TILEMAP.set_cell(coords, 0, tileset.get_atlas_coords(tile_name))
+	var building_type = tile_name.split("_")[0] # e.g. wwtw or fwtw
+	tiles[coords] = tile_name
+	var neighbors_of_same_type = []
+	for neighbor in CONSTRUCTION_TILEMAP.get_surrounding_cells(coords):
+		if neighbor in tile_nodes and tile_nodes[neighbor].split("_")[0] == building_type:
+			neighbors_of_same_type.append(neighbor)
 	
-	### 1. Rivers ###
+	# Find a node name that is not already in use
+	var i = 0
+	var node_name = building_type + "_%s" % i
+	while node_name in nodes:
+		i += 1
+		node_name = building_type + "_%s" % i
 	
-	### 2. Constructions ###
-		# Handle constraints ? (fwtw_main / wwtw_main must be next to a river tile
-	return {}
+	if len(neighbors_of_same_type) == 0: # create new node
+		nodes[node_name] = {
+			"tiles": [coords],
+			"attributes": default_attributes[building_type]
+		}
+		tile_nodes[coords] = node_name
+	if len(neighbors_of_same_type) == 1: # append tile to existing node
+		var neighbor = neighbors_of_same_type[0]
+		nodes[tile_nodes[neighbor]]["tiles"].append(coords)
+		tile_nodes[coords] = tile_nodes[neighbor] 
+	if len(neighbors_of_same_type) > 1: # merge the neighbor nodes and append
+		var all_tiles = [] # merge the tiles of all the neighbor nodes of same type
+		for neighbor in neighbors_of_same_type:
+			all_tiles.append_array(nodes[tile_nodes[neighbor]]["tiles"])
+			tile_nodes[neighbor] = node_name
+			# TODO : renommer tous les arcs dans le dictionnaire arcs
+		nodes[node_name] = {
+			"tiles": all_tiles,
+			"attributes": default_attributes[building_type]
+		}
+		tile_nodes[coords] = node_name
+
+func add_arc_if_possible(node_from: String, node_to: String):
+	if node_from != node_to:
+		var arc_name = "%s_to_%s" % [node_from, node_to]
+		var arc_name_reversed = "%s_to_%s" % [node_to, node_from]
+		if arc_name not in arcs and arc_name_reversed not in arcs: # if the arc does not already exist
+			var attributes = {}
+			var arc_type = "%s_to_%s" % [node_from.split("_")[0], node_to.split("_")[0]]
+			if arc_type in default_attributes:
+				attributes = default_attributes[arc_type]
+				
+			arcs[arc_name] = {
+				"from": node_from,
+				"to": node_to,
+				"attributes": attributes
+			}
+			arcs_from.get_or_add(arc_name, []).append(node_from)
+			arcs_to.get_or_add(arc_name, []).append(node_to)
+			
+			print("Created arc %s:" % arc_name, arcs[arc_name])
+			return true
+	return false
+
+func find_angle_path(start: Vector2i, end: Vector2i):
+	var path = [start]
+	
+	if end[1] > start[1]:
+		for k in range(start[1]+1, end[1]+1):
+			path.append(Vector2i(start[0], k))
+	else:
+		for k in range(start[1]-1, end[1]-1, -1):
+			path.append(Vector2i(start[0], k))
+	
+	if end[0] > start[0]:
+		for k in range(start[0]+1, end[0]+1):
+			path.append(Vector2i(k, end[1]))
+	else:
+		for k in range(start[0]-1, end[0]-1, -1):
+			path.append(Vector2i(k, end[1]))
+
+	return path
+
+func load_tilemaps_from_tile_dicts():
+	for tile in terrain_tiles:
+		TERRAIN_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(terrain_tiles[tile]))
+	for tile in tiles:
+		CONSTRUCTION_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(tiles[tile]))
+
+func display_arcs():
+	clear_arcs()
+	
+	for arc in arcs:
+		var arc_tilemap = TileMapLayer.new()
+		arc_tilemap.tile_set=OVERLAY_TILEMAP.tile_set
+		arc_tilemap.position=OVERLAY_TILEMAP.position
+		arc_tilemap.material=OVERLAY_TILEMAP.material
+		arc_tilemap.z_index = 2
+		arcs_tilemaps.add_child(arc_tilemap)
+		
+		var path = find_angle_path(nodes[arcs[arc]["from"]]["tiles"][0], nodes[arcs[arc]["to"]]["tiles"][0])
+		
+		# Start
+		arc_tilemap.set_cell(path[0], 0, tileset.get_atlas_coords("arcArrowStart_%s" % (path[1]-path[0])))
+		
+		for i in range(1, len(path)-1):
+			if (path[i]-path[i-1]) != (path[i+1]-path[i]):
+				arc_tilemap.set_cell(path[i], 0, tileset.get_atlas_coords("arcArrow_%s_%s" % [(path[i]-path[i-1]),(path[i+1]-path[i])]))
+			else:
+				arc_tilemap.set_cell(path[i], 0, tileset.get_atlas_coords("arcArrow_%s" % (path[i+1]-path[i])))
+		# End
+		arc_tilemap.set_cell(path[-1], 0, tileset.get_atlas_coords("arcArrowEnd_%s" % (path[-1]-path[-2])))
+
+func clear_arcs():
+	for child in arcs_tilemaps.get_children():
+		if child is TileMapLayer:
+			child.clear()
+	
 
 func _ready():
+	print("Ready")
+
 	OVERLAY_TILEMAP.clear()
 	var overlay_shader = load(OVERLAY_SHADER_PATH)
 	var overlay_material = ShaderMaterial.new()
@@ -108,89 +370,133 @@ func _ready():
 	overlay_material.set_shader_parameter("opacity", 0.5)
 	OVERLAY_TILEMAP.material = overlay_material
 	
-	construction_map = load_map_from_tilemap(CONSTRUCTION_TILEMAP)
-	terrain_map = load_map_from_tilemap(TERRAIN_TILEMAP)
-	update_constructions()
-
-enum State { IDLE, ARC_CREATION, BUILDING }
-var current_state = State.IDLE
-var hovered_cell = null
-var clicked_cells = []
-var requested_building = null
-
-func update_constructions():
-	var constructions_inventory_and_group_parents = make_constructions_inventory()
-	constructions_inventory = constructions_inventory_and_group_parents[0]
-	construction_groups = constructions_inventory_and_group_parents[1]
-
-func add_building(building: Array, coords: Vector2i):
-	print(building, construction_map, coords)
-	construction_map[coords] = building
-	CONSTRUCTION_TILEMAP.set_cell(coords, 0, nodes_to_tiles[building[0]])
-	update_constructions()
+	# TODO : add the ability to load save from json file
+	load_terrain_from_default_tilemap()
 	
+	add_building(Vector2i(2,-1), "wwtw_main")
+	
+	
+	# TODO : save dicts in json file to be able to save game progression
+	load_tilemaps_from_tile_dicts()
 
-func _on_create_arc_pressed() -> void:
-	current_state = State.ARC_CREATION
-	clicked_cells = []
-
-func _on_residential_1_pressed() -> void:
-	current_state = State.BUILDING
-	requested_building = default_nodes["residential_1"]
+enum State { IDLE, CREATE_ARC, CREATE_BUILDING }
+var show_arcs = false
+var current_state = { "type": State.IDLE }
+var hovered_cell = null
 
 func _input(event):
 	var mouse_pos = TERRAIN_TILEMAP.get_local_mouse_position()
 	var new_hovered_cell = TERRAIN_TILEMAP.local_to_map(mouse_pos)
 	
-	match current_state:
-		State.BUILDING:
-			# Overlay over available terrain
-			if not (hovered_cell == new_hovered_cell):
-				if hovered_cell != null:
-					OVERLAY_TILEMAP.clear()
-					
-			if new_hovered_cell not in construction_groups \
-				and new_hovered_cell in terrain_map \
-				and terrain_map[new_hovered_cell][0] not in ["river", "catchment", "outlet"]:
-				
-				if not (hovered_cell == new_hovered_cell):
-					OVERLAY_TILEMAP.set_cell(new_hovered_cell, 0, nodes_to_tiles[requested_building[0]])
-				
-				if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-					print("build", requested_building)
-					add_building(requested_building, new_hovered_cell)
-					OVERLAY_TILEMAP.clear()
-					current_state = State.IDLE
-				
-		State.ARC_CREATION:
-			# Overlay over hovered buildings
-			if not (hovered_cell == new_hovered_cell):
-				if new_hovered_cell in construction_groups:
-					if hovered_cell != null:
-						OVERLAY_TILEMAP.clear()
-					# Overlay over the whole group of buildings
-					var cell_group = construction_groups[new_hovered_cell]
-					if cell_group is Vector2i: # fetch the group from the parent
-						cell_group = construction_groups[cell_group]
-					for cell in cell_group:
-						OVERLAY_TILEMAP.set_cell(cell, 0, CONSTRUCTION_TILEMAP.get_cell_atlas_coords(cell))
-				else:
-					OVERLAY_TILEMAP.clear()
-			# Selecting the two nodes to make an arc between
-			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-				if len(clicked_cells) == 1:
-					print("end selection")
-					clicked_cells.append(new_hovered_cell)
-					print(clicked_cells)
-					current_state = State.IDLE
-					OVERLAY_TILEMAP.clear()
-				if len(clicked_cells) == 0:
-					print("start selection")
-					clicked_cells.append(new_hovered_cell)
-			# Check for right click to cancel selection
-			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-				print("cancel selection")
-				current_state = State.IDLE
+	if current_state["type"] == State.CREATE_BUILDING:
+		# The terrain is available if there is no building on the terrain and the terrain is not a river
+		var terrain_available = new_hovered_cell in terrain_tiles and new_hovered_cell not in tile_nodes and \
+				not (new_hovered_cell in terrain_tiles and terrain_tiles[new_hovered_cell].split("_")[0] in ["river", "catchment", "outlet"])
+		
+		# Overlay over available terrain
+		if not (new_hovered_cell == hovered_cell):
+			OVERLAY_TILEMAP.clear()
+			if terrain_available:
+				OVERLAY_TILEMAP.set_cell(new_hovered_cell, 0, tileset.get_atlas_coords(current_state["attributes"]["tile_name"]))
+		
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+			and terrain_available:
+			add_building(new_hovered_cell, current_state["attributes"]["tile_name"])
+			current_state = { "type": State.IDLE }
+			OVERLAY_TILEMAP.clear()
+
+	if current_state["type"] == State.CREATE_ARC:
+		# Overlay over hovered buildings
+		if not (new_hovered_cell == hovered_cell):
+			OVERLAY_TILEMAP.clear()
+			if new_hovered_cell in tile_nodes:
+				for tile in nodes[tile_nodes[new_hovered_cell]]["tiles"]:
+					OVERLAY_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(tiles[tile]))
+		
+		# Overlay over selected "from" building
+		if current_state["attributes"]["from"] != null:
+			for tile in nodes[current_state["attributes"]["from"]]["tiles"]:
+				OVERLAY_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(tiles[tile]))
+		
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+			and new_hovered_cell in tile_nodes:
+			if current_state["attributes"]["from"] == null: # first click
+				current_state["attributes"]["from"] = tile_nodes[new_hovered_cell]
+			elif current_state["attributes"]["to"] == null: # second click
+				current_state["attributes"]["to"] = tile_nodes[new_hovered_cell]
+				add_arc_if_possible(current_state["attributes"]["from"], current_state["attributes"]["to"])
+				if show_arcs:
+					display_arcs()
+				current_state = { "type": State.IDLE }
 				OVERLAY_TILEMAP.clear()
-			
+	
 	hovered_cell = new_hovered_cell
+
+func _on_create_arc_pressed() -> void:
+	current_state = {
+		"type": State.CREATE_ARC,
+		"attributes": {
+			"from": null,
+			"to": null
+		}
+	}
+
+func _on_residential_1_pressed() -> void:
+	current_state = {
+		"type": State.CREATE_BUILDING,
+		"attributes": { "tile_name": "residential_1" }
+	}
+
+func _on_show_arcs_toggled(toggled_on: bool) -> void:
+	show_arcs = toggled_on
+	if show_arcs:
+		display_arcs()
+	else:
+		clear_arcs()
+	
+	
+		
+	#var data_json = JSON.stringify({"nodes": nodes, "arcs": arcs})
+#
+	#var file = FileAccess.open("user://data.json", FileAccess.WRITE)
+#
+	#if file != null:
+		#file.store_string(data_json)
+		#file = null  # Explicitly close the file
+	#else:
+		#print("Error opening file for writing")
+		#return
+#
+	## Wait a bit to ensure file is written
+	#await get_tree().process_frame
+#
+	## Now execute the Python script
+	#var json_file = OS.get_user_data_dir() + "/data.json"
+	#var output_image = OS.get_user_data_dir() + "/plot.png"
+	#var python_script = ProjectSettings.globalize_path("res://scripts/process_data.py")
+#
+	#var output = []
+	#var exit_code = OS.execute("python", [python_script, json_file, output_image], output)
+#
+	#if exit_code != 0:
+		#print("Error generating plot: ", output)
+		#return
+	#
+	#print("Plot generated successfully")
+	#
+	#var image = Image.new()
+	#var error = image.load(output_image)
+	#
+	#if error != OK:
+		#print("Error loading image: ", error)
+		#return
+	#
+	##var texture = ImageTexture.create_from_image(image)
+	##var sprite = Sprite2D.new()
+	##sprite.texture = texture
+	##sprite.position.x = 640
+	##sprite.position.y = 360
+	##sprite.z_index = 1000
+	##add_child(sprite)
+	#
+	#print("Image displayed!")

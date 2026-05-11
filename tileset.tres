@@ -1,0 +1,64 @@
+[gd_resource type="TileSet" format=3 uid="uid://b6mv2h1tc76ki"]
+
+[ext_resource type="Texture2D" uid="uid://bvrdqh01ipqoi" path="res://spritesheet-v2.png" id="1_2urvg"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_2urvg"]
+texture = ExtResource("1_2urvg")
+texture_region_size = Vector2i(96, 96)
+0:0/0 = 0
+0:0/0/texture_origin = Vector2i(0, 30)
+1:0/0 = 0
+1:0/0/texture_origin = Vector2i(0, 30)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, 30)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, 30)
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
+3:2/0 = 0
+0:3/0 = 0
+1:3/0 = 0
+2:3/0 = 0
+3:3/0 = 0
+0:4/0 = 0
+1:4/0 = 0
+2:4/0 = 0
+3:4/0 = 0
+0:5/0 = 0
+1:5/0 = 0
+2:5/0 = 0
+3:5/0 = 0
+0:6/0 = 0
+1:6/0 = 0
+2:6/0 = 0
+3:6/0 = 0
+0:7/0 = 0
+1:7/0 = 0
+2:7/0 = 0
+3:7/0 = 0
+0:8/0 = 0
+1:8/0 = 0
+2:8/0 = 0
+3:8/0 = 0
+0:9/0 = 0
+1:9/0 = 0
+2:9/0 = 0
+3:9/0 = 0
+2:10/0 = 0
+3:10/0 = 0
+0:11/0 = 0
+1:11/0 = 0
+2:11/0 = 0
+3:11/0 = 0
+4:1/0 = 0
+
+[resource]
+tile_shape = 1
+tile_layout = 4
+tile_size = Vector2i(96, 54)
+sources/0 = SubResource("TileSetAtlasSource_2urvg")

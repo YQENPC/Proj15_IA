@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://cn178iea1iglt"]
+
+[ext_resource type="Texture2D" uid="uid://3h2b07aer5l8" path="res://icon.svg" id="1_mehiu"]
+
+[sub_resource type="GDScript" id="GDScript_f7cmv"]
+script/source = "extends Sprite2D
+
+var speed = 400
+var angular_speed = PI
+
+func _init():
+	print(\"Hello, world!\")
+
+func _process(delta):
+	rotation += angular_speed * delta
+	var velocity = Vector2.UP.rotated(rotation) * speed
+	position += velocity * delta
+	
+"
+
+[node name="Sprite2D" type="Sprite2D" unique_id=1595804389]
+texture = ExtResource("1_mehiu")
+script = SubResource("GDScript_f7cmv")
