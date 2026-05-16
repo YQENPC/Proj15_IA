@@ -3,23 +3,31 @@
 [ext_resource type="Script" uid="uid://dtdvphg4afov3" path="res://world.gd" id="1_tlwt5"]
 [ext_resource type="TileSet" uid="uid://b6mv2h1tc76ki" path="res://tileset.tres" id="3_036b0"]
 [ext_resource type="Shader" uid="uid://55ax5b1qht3u" path="res://overlay.gdshader" id="3_aqk2v"]
-[ext_resource type="Texture2D" uid="uid://tnfn4p86e1fs" path="res://spritesheet-v1.png" id="4_aqk2v"]
+[ext_resource type="Texture2D" uid="uid://wf2nfxqyhit4" path="res://spritesheet-v2.png" id="4_036b0"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_036b0"]
 shader = ExtResource("3_aqk2v")
 shader_parameter/opacity = 0.5050000239875
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_aqk2v"]
-atlas = ExtResource("4_aqk2v")
-region = Rect2(0, 0, 84, 84)
+[sub_resource type="AtlasTexture" id="AtlasTexture_dwbse"]
+atlas = ExtResource("4_036b0")
+region = Rect2(288, 14, 96, 80)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_036b0"]
-atlas = ExtResource("4_aqk2v")
-region = Rect2(168, 0, 84, 84)
+atlas = ExtResource("4_036b0")
+region = Rect2(192, 16, 96, 80)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_dwbse"]
-atlas = ExtResource("4_aqk2v")
-region = Rect2(252, 0, 84, 84)
+[sub_resource type="AtlasTexture" id="AtlasTexture_pkg7o"]
+atlas = ExtResource("4_036b0")
+region = Rect2(0, 16, 96, 80)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_aqk2v"]
+atlas = SubResource("AtlasTexture_pkg7o")
+region = Rect2(0, 0, 84, 84)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_gbfbk"]
+atlas = ExtResource("4_036b0")
+region = Rect2(96, 28, 96, 80)
 
 [node name="World" type="Node2D" unique_id=450098406]
 script = ExtResource("1_tlwt5")
@@ -55,6 +63,49 @@ offset_top = 10.0
 offset_right = 294.0
 offset_bottom = 137.0
 
+[node name="buildings_label" type="Label" parent="UI/VBoxContainer" unique_id=129345708]
+layout_mode = 2
+text = "Buildings"
+
+[node name="GridContainer2" type="GridContainer" parent="UI/VBoxContainer" unique_id=1246331304]
+layout_mode = 2
+columns = 2
+
+[node name="residential_1" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=3783143]
+layout_mode = 2
+size_flags_horizontal = 3
+icon = SubResource("AtlasTexture_dwbse")
+icon_alignment = 1
+
+[node name="fwtw_main" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=449443223]
+layout_mode = 2
+size_flags_horizontal = 3
+icon = SubResource("AtlasTexture_036b0")
+icon_alignment = 1
+
+[node name="wwtw_main" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=1276595779]
+layout_mode = 2
+size_flags_horizontal = 3
+icon = SubResource("AtlasTexture_aqk2v")
+icon_alignment = 1
+
+[node name="wwtw_1" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=623177948]
+layout_mode = 2
+size_flags_horizontal = 3
+icon = SubResource("AtlasTexture_gbfbk")
+icon_alignment = 1
+
+[node name="GridContainer3" type="HBoxContainer" parent="UI/VBoxContainer" unique_id=2143710060]
+layout_mode = 2
+
+[node name="remove_building" type="Button" parent="UI/VBoxContainer" unique_id=2045038863]
+layout_mode = 2
+text = "Remove building"
+
+[node name="arcs_label" type="Label" parent="UI/VBoxContainer" unique_id=238811171]
+layout_mode = 2
+text = "Arcs"
+
 [node name="show_arcs" type="CheckButton" parent="UI/VBoxContainer" unique_id=604748034]
 layout_mode = 2
 text = "Show Arcs"
@@ -63,21 +114,40 @@ text = "Show Arcs"
 layout_mode = 2
 text = "Create arc"
 
-[node name="VBoxContainer" type="HBoxContainer" parent="UI/VBoxContainer" unique_id=1655524414]
+[node name="impervious_land_settings" type="Button" parent="UI/VBoxContainer" unique_id=48528123]
 layout_mode = 2
+text = "Impervious land settings"
 
-[node name="wwtw_main" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=988499394]
+[node name="pervious_land_settings" type="Button" parent="UI/VBoxContainer" unique_id=1431505123]
 layout_mode = 2
-icon = SubResource("AtlasTexture_aqk2v")
+text = "Pervious land settings"
 
-[node name="fwtw_main" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=449443223]
+[node name="sewer_settings" type="Button" parent="UI/VBoxContainer" unique_id=655208260]
 layout_mode = 2
-icon = SubResource("AtlasTexture_036b0")
+text = "Sewer settings"
 
-[node name="residential_1" type="Button" parent="UI/VBoxContainer/VBoxContainer" unique_id=3783143]
+[node name="input_data_label" type="Label" parent="UI/VBoxContainer" unique_id=1829052859]
 layout_mode = 2
-icon = SubResource("AtlasTexture_dwbse")
+text = "Input data"
 
+[node name="input_data_select" type="OptionButton" parent="UI/VBoxContainer" unique_id=1921776025]
+layout_mode = 2
+selected = 0
+item_count = 1
+popup/item_0/text = "Paris"
+popup/item_0/id = 0
+
+[node name="run_simulation" type="Button" parent="UI/VBoxContainer" unique_id=1334317140]
+layout_mode = 2
+text = "Run simulation"
+
+[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/residential_1" to="." method="_on_residential_1_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/fwtw_main" to="." method="_on_fwtw_main_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/wwtw_main" to="." method="_on_wwtw_main_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/wwtw_1" to="." method="_on_wwtw_1_pressed"]
 [connection signal="toggled" from="UI/VBoxContainer/show_arcs" to="." method="_on_show_arcs_toggled"]
 [connection signal="pressed" from="UI/VBoxContainer/create_arc" to="." method="_on_create_arc_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/VBoxContainer/residential_1" to="." method="_on_residential_1_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/impervious_land_settings" to="." method="_on_impervious_land_settings_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/pervious_land_settings" to="." method="_on_pervious_land_settings_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/sewer_settings" to="." method="_on_sewer_settings_pressed"]
+[connection signal="pressed" from="UI/VBoxContainer/run_simulation" to="." method="_on_run_simulation_pressed"]
