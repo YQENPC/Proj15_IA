@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b6beo53c0loas"
+
+[deps]
+
+files=["res://scripts/python/data/processed_data_paris_seine.date.translation", "res://scripts/python/data/processed_data_paris_seine.variable.translation", "res://scripts/python/data/processed_data_paris_seine.value.translation"]
+
+source_file="res://scripts/python/data/processed_data_paris_seine.csv"
+dest_files=["res://scripts/python/data/processed_data_paris_seine.date.translation", "res://scripts/python/data/processed_data_paris_seine.variable.translation", "res://scripts/python/data/processed_data_paris_seine.value.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

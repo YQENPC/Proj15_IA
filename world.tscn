@@ -57,97 +57,88 @@ tile_set = ExtResource("3_036b0")
 
 [node name="UI" type="CanvasLayer" parent="." unique_id=1806466704]
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI" unique_id=1791293942]
+[node name="side_menu" type="VBoxContainer" parent="UI" unique_id=1791293942]
 offset_left = 10.0
 offset_top = 10.0
 offset_right = 294.0
 offset_bottom = 137.0
 
-[node name="buildings_label" type="Label" parent="UI/VBoxContainer" unique_id=129345708]
+[node name="buildings_label" type="Label" parent="UI/side_menu" unique_id=129345708]
 layout_mode = 2
 text = "Buildings"
 
-[node name="GridContainer2" type="GridContainer" parent="UI/VBoxContainer" unique_id=1246331304]
+[node name="GridContainer" type="GridContainer" parent="UI/side_menu" unique_id=1246331304]
 layout_mode = 2
 columns = 2
 
-[node name="residential_1" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=3783143]
+[node name="residential_1" type="Button" parent="UI/side_menu/GridContainer" unique_id=3783143]
 layout_mode = 2
 size_flags_horizontal = 3
 icon = SubResource("AtlasTexture_dwbse")
 icon_alignment = 1
 
-[node name="fwtw_main" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=449443223]
+[node name="fwtw_main" type="Button" parent="UI/side_menu/GridContainer" unique_id=449443223]
 layout_mode = 2
 size_flags_horizontal = 3
 icon = SubResource("AtlasTexture_036b0")
 icon_alignment = 1
 
-[node name="wwtw_main" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=1276595779]
+[node name="wwtw_main" type="Button" parent="UI/side_menu/GridContainer" unique_id=1276595779]
 layout_mode = 2
 size_flags_horizontal = 3
 icon = SubResource("AtlasTexture_aqk2v")
 icon_alignment = 1
 
-[node name="wwtw_1" type="Button" parent="UI/VBoxContainer/GridContainer2" unique_id=623177948]
+[node name="wwtw_1" type="Button" parent="UI/side_menu/GridContainer" unique_id=623177948]
 layout_mode = 2
 size_flags_horizontal = 3
 icon = SubResource("AtlasTexture_gbfbk")
 icon_alignment = 1
 
-[node name="GridContainer3" type="HBoxContainer" parent="UI/VBoxContainer" unique_id=2143710060]
-layout_mode = 2
-
-[node name="remove_building" type="Button" parent="UI/VBoxContainer" unique_id=2045038863]
+[node name="remove_building" type="Button" parent="UI/side_menu" unique_id=2045038863]
 layout_mode = 2
 text = "Remove building"
 
-[node name="arcs_label" type="Label" parent="UI/VBoxContainer" unique_id=238811171]
+[node name="arcs_label" type="Label" parent="UI/side_menu" unique_id=238811171]
 layout_mode = 2
 text = "Arcs"
 
-[node name="show_arcs" type="CheckButton" parent="UI/VBoxContainer" unique_id=604748034]
+[node name="show_arcs" type="CheckButton" parent="UI/side_menu" unique_id=604748034]
 layout_mode = 2
 text = "Show Arcs"
 
-[node name="create_arc" type="Button" parent="UI/VBoxContainer" unique_id=1342713075]
+[node name="create_arc" type="Button" parent="UI/side_menu" unique_id=1342713075]
 layout_mode = 2
 text = "Create arc"
 
-[node name="impervious_land_settings" type="Button" parent="UI/VBoxContainer" unique_id=48528123]
+[node name="remove_arc" type="Button" parent="UI/side_menu" unique_id=761131153]
 layout_mode = 2
-text = "Impervious land settings"
+text = "Remove arc"
 
-[node name="pervious_land_settings" type="Button" parent="UI/VBoxContainer" unique_id=1431505123]
+[node name="global_settings_label" type="Label" parent="UI/side_menu" unique_id=25651215]
 layout_mode = 2
-text = "Pervious land settings"
+text = "Global settings"
 
-[node name="sewer_settings" type="Button" parent="UI/VBoxContainer" unique_id=655208260]
+[node name="land_settings" type="Button" parent="UI/side_menu" unique_id=48528123]
+layout_mode = 2
+text = "Land settings"
+
+[node name="sewer_settings" type="Button" parent="UI/side_menu" unique_id=655208260]
 layout_mode = 2
 text = "Sewer settings"
 
-[node name="input_data_label" type="Label" parent="UI/VBoxContainer" unique_id=1829052859]
-layout_mode = 2
-text = "Input data"
-
-[node name="input_data_select" type="OptionButton" parent="UI/VBoxContainer" unique_id=1921776025]
-layout_mode = 2
-selected = 0
-item_count = 1
-popup/item_0/text = "Paris"
-popup/item_0/id = 0
-
-[node name="run_simulation" type="Button" parent="UI/VBoxContainer" unique_id=1334317140]
+[node name="run_simulation" type="Button" parent="UI/side_menu" unique_id=1334317140]
 layout_mode = 2
 text = "Run simulation"
 
-[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/residential_1" to="." method="_on_residential_1_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/fwtw_main" to="." method="_on_fwtw_main_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/wwtw_main" to="." method="_on_wwtw_main_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/GridContainer2/wwtw_1" to="." method="_on_wwtw_1_pressed"]
-[connection signal="toggled" from="UI/VBoxContainer/show_arcs" to="." method="_on_show_arcs_toggled"]
-[connection signal="pressed" from="UI/VBoxContainer/create_arc" to="." method="_on_create_arc_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/impervious_land_settings" to="." method="_on_impervious_land_settings_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/pervious_land_settings" to="." method="_on_pervious_land_settings_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/sewer_settings" to="." method="_on_sewer_settings_pressed"]
-[connection signal="pressed" from="UI/VBoxContainer/run_simulation" to="." method="_on_run_simulation_pressed"]
+[connection signal="pressed" from="UI/side_menu/GridContainer/residential_1" to="." method="_on_residential_1_pressed"]
+[connection signal="pressed" from="UI/side_menu/GridContainer/fwtw_main" to="." method="_on_fwtw_main_pressed"]
+[connection signal="pressed" from="UI/side_menu/GridContainer/wwtw_main" to="." method="_on_wwtw_main_pressed"]
+[connection signal="pressed" from="UI/side_menu/GridContainer/wwtw_1" to="." method="_on_wwtw_1_pressed"]
+[connection signal="pressed" from="UI/side_menu/remove_building" to="." method="_on_remove_building_pressed"]
+[connection signal="toggled" from="UI/side_menu/show_arcs" to="." method="_on_show_arcs_toggled"]
+[connection signal="pressed" from="UI/side_menu/create_arc" to="." method="_on_create_arc_pressed"]
+[connection signal="pressed" from="UI/side_menu/remove_arc" to="." method="_on_remove_arc_pressed"]
+[connection signal="pressed" from="UI/side_menu/land_settings" to="." method="_on_land_settings_pressed"]
+[connection signal="pressed" from="UI/side_menu/sewer_settings" to="." method="_on_sewer_settings_pressed"]
+[connection signal="pressed" from="UI/side_menu/run_simulation" to="." method="_on_run_simulation_pressed"]

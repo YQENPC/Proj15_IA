@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bbdy1hvcvq0ih"
+
+[deps]
+
+files=["res://scripts/python/data/processed_data_oxford_thames.date.translation", "res://scripts/python/data/processed_data_oxford_thames.variable.translation", "res://scripts/python/data/processed_data_oxford_thames.value.translation"]
+
+source_file="res://scripts/python/data/processed_data_oxford_thames.csv"
+dest_files=["res://scripts/python/data/processed_data_oxford_thames.date.translation", "res://scripts/python/data/processed_data_oxford_thames.variable.translation", "res://scripts/python/data/processed_data_oxford_thames.value.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

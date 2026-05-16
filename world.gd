@@ -1,16 +1,10 @@
 extends Node2D
 
-func flatten_array(arr: Array[Array]):
-	var flattened_array: Array = []
-	for sub_arr in arr:
-		for item in sub_arr:
-			flattened_array.append(item)
-	return flattened_array
-
 @onready var TERRAIN_TILEMAP: TileMapLayer = $city_builder/terrain
 @onready var CONSTRUCTION_TILEMAP: TileMapLayer = $city_builder/construction
 @onready var OVERLAY_TILEMAP: TileMapLayer = $city_builder/overlay
 @onready var arcs_tilemaps: Node = $city_builder/arcs_tilemaps # Arcs tilemaps will be placed under this node
+@onready var run_simulation_button: Button = $UI/side_menu/run_simulation
 
 const OVERLAY_SHADER_PATH = "res://overlay.gdshader"
 const ARCS_SHADER_PATH = "res://arcs.gdshader"
@@ -20,18 +14,15 @@ var SetClass = load("res://set.gd") # imports the class Set
 
 const INF = 1_000_000_000_000 # represents +infinity
 
-const input_data_paths = {
-	"Paris": "./test/processed_data_paris.csv"
+var input_data_paths = {
+	"Tamise à Oxford": ProjectSettings.globalize_path("res://scripts/python/data/processed_data_oxford_thames.csv"),
+	"Seine à Paris": ProjectSettings.globalize_path("res://scripts/python/data/processed_data_paris_seine.csv")
 }
-var input_data_path: String = input_data_paths["Paris"]
 
+# Game data
 var nodes: Dictionary = {}
-
 var arcs: Dictionary = {}
-#var arcs_from: Dictionary = {} # node -> array of arcs (arcs going from node)
-#var arcs_to: Dictionary = {} # node -> array of arcs (arcs going to node)
-
-var terrain_tile_nodes = {} # cell coords -> terrain node name ("river_xxx" or "urbanLand" or "ruralLand")
+var terrain_tile_nodes = {} # cell coords -> terrain node name ("river_xxx" or "land")
 var tile_nodes = {} # cell coords -> node name (e.g. "wwtw_0")
 var terrain_tiles = {} # cell coords -> terrain tile name (e.g. "river", "ruralLand")
 var tiles = {} # cell coords -> tile name (e.g. "wwtw_main")
@@ -68,7 +59,7 @@ var tileset = Tileset.new([
 	["arcArrow_(-1, 0)_(0, -1)", Vector2i(3,6)]
 ])
 
-const default_attributes = { # must be intensive values (i.e. per tile values), it's easier that way
+var default_attributes = { # must be intensive values (i.e. per tile values), it's easier that way
 	### Nodes ###
 	"wwtw": {
 		"stormwater_storage_capacity": 2e3,
@@ -84,20 +75,25 @@ const default_attributes = { # must be intensive values (i.e. per tile values), 
 		"population": 1e4,
 		"per_capita": 0.15
 	},
-	"ruralLand": {
-		"area": 1e5,
-		"initial_storage": 5e4,
-		"field_capacity": 0.3,
-		"depth": 0.5
-	},
-	"urbanLand": {
-		"area": 1e5,
-		"initial_storage": 5e4
+	"land": {
+		"pervious": {
+			"area": 1e5,
+			"initial_storage": 5e4,
+			"field_capacity": 0.3,
+			"depth": 0.5
+		},
+		"impervious": {
+			"area": 1e5,
+			"initial_storage": 5e4,
+		},
+		"input_data": input_data_paths.keys()[0]
 	},
 	"sewer": {
 		"capacity": 1e6
 	},
-	"catchment": {},
+	"catchment": {
+		"input_data": input_data_paths.keys()[0]
+	},
 	"outlet": {},
 	
 	### Arcs ### # must be in this dictionary to be considered valid
@@ -112,7 +108,18 @@ const default_attributes = { # must be intensive values (i.e. per tile values), 
 	"river_to_outlet": {}
 }
 
+const mergeable_building_types = {
+	"residential": true
+}
 
+# ---
+
+func flatten_array(arr: Array[Array]):
+	var flattened_array: Array = []
+	for sub_arr in arr:
+		for item in sub_arr:
+			flattened_array.append(item)
+	return flattened_array
 
 func find_river_path_dfs(start: Vector2i, goal: Vector2i):
 	var stack = [start] 
@@ -140,8 +147,10 @@ func find_river_path_dfs(start: Vector2i, goal: Vector2i):
 
 func load_terrain_from_default_tilemap():
 	var used_cells = TERRAIN_TILEMAP.get_used_cells()
-	nodes["ruralLand"] = { "tiles": [], "attributes": default_attributes["ruralLand"]}
-	nodes["urbanLand"] = { "tiles": [], "attributes": default_attributes["urbanLand"]}
+	nodes["land"] = {
+		"tiles": [],
+		"attributes": default_attributes["land"]
+	}
 	nodes["sewer"] = { "tiles": [], "attributes": default_attributes["sewer"] }
 	
 	var catchments = []
@@ -153,8 +162,8 @@ func load_terrain_from_default_tilemap():
 		var tile_name = tileset.get_tile_name(TERRAIN_TILEMAP.get_cell_atlas_coords(cell))
 		terrain_tiles[cell] = tile_name
 		if tile_name in ["ruralLand", "urbanLand"]:
-			nodes[tile_name]["tiles"].append(cell)
-			terrain_tile_nodes[cell] = tile_name
+			nodes["land"]["tiles"].append(cell)
+			terrain_tile_nodes[cell] = "land"
 		if tile_name == "catchment":
 			var node_name = "catchment_%s" % len(catchments)
 			nodes[node_name] = { "tiles": [cell], "attributes": default_attributes["catchment"] }
@@ -265,6 +274,40 @@ func load_terrain_from_default_tilemap():
 				connected[neighbor] = true
 				a_parcourir.append(neighbor)
 
+func save_game(directory: String = "saves"):
+	var game_data_json = JSON.stringify({
+		"nodes": nodes, 
+		"arcs": arcs,
+		"terrain_tile_nodes": terrain_tile_nodes,
+		"tile_nodes": tile_nodes,
+		"terrain_tiles": terrain_tiles,
+		"tiles": tiles,
+		"input_data_paths": input_data_paths
+	}, "\t")
+	
+	var time = Time.get_datetime_dict_from_system()
+	var save_filename = "save_%04d%02d%02d_%02d%02d%02d.json" % [time.year, time.month, time.day, time.hour, time.minute, time.second]
+	var save_filepath = "user://%s/%s" % [directory, save_filename]
+	var user_dir = DirAccess.open("user://")
+	if not user_dir.dir_exists(directory):
+		print("'%s' folder does not exist, creating it" % directory)
+		user_dir.make_dir(directory)
+	var file = FileAccess.open(save_filepath, FileAccess.WRITE)
+	if file != null:
+		file.store_string(game_data_json)
+		file = null  # Explicitly close the file
+		print("Successfully saved game data to %s" % ProjectSettings.globalize_path(save_filepath))
+	else:
+		print("Error opening file for writing")
+		return
+		
+	return save_filepath
+
+func load_saved_game():
+	# TODO
+	pass
+
+
 func add_building(coords: Vector2i, tile_name: String):
 	CONSTRUCTION_TILEMAP.set_cell(coords, 0, tileset.get_atlas_coords(tile_name))
 	var building_type = tile_name.split("_")[0] # e.g. wwtw or fwtw
@@ -305,13 +348,12 @@ func add_building(coords: Vector2i, tile_name: String):
 						add_arc_if_possible(node_name, terrain_tile_nodes[tile])
 					break
 		print("create new node: ", node_name)
-	if len(neighbors_of_same_type) == 1: # append tile to existing node
+	elif len(neighbors_of_same_type) == 1 or building_type not in mergeable_building_types: # append tile to existing node
 		var neighbor_node = neighbors_of_same_type[0]
 		nodes[neighbor_node]["tiles"].append(coords)
 		tile_nodes[coords] = neighbor_node
 		print("append tile to existing node: ", neighbor_node)
-	if len(neighbors_of_same_type) > 1: # merge the neighbor nodes and append
-		# TODO : fix bug when merging two nodes which already have a main building (would result in a node with two main buildings, we dont want that)
+	else : # (len(neighbors_of_same_type) > 1 and building_type in mergeable_building_types) merge the neighbor nodes and append
 		var all_tiles = [] # merge the tiles of all the neighbor nodes of same type
 		var previous_nodes = []
 		for neighbor_node in neighbors_of_same_type:
@@ -341,10 +383,14 @@ func add_building(coords: Vector2i, tile_name: String):
 	if show_arcs:
 		display_arcs()
 
-func remove_building(coords: Vector2i):
+func remove_node(node_name: String):
+	print("remove node: ", node_name)
+	# Remove node and all associated arcs
+	# Clear all tiles
 	pass # TODO
 
 func open_node_editor(node_name: String) -> void:
+	# TODO : select list for catchment input_data_path
 	var attributes = nodes[node_name]["attributes"]
 	# Create the popup panel
 	var popup = PopupPanel.new()
@@ -400,6 +446,12 @@ func open_node_editor(node_name: String) -> void:
 					new_attributes[attr_name] = float(value)
 				else:
 					new_attributes[attr_name] = value
+			elif original_value is Dictionary:
+				var parsed_value = JSON.parse_string(value)
+				if parsed_value == null:
+					new_attributes[attr_name] = original_value
+				else:
+					new_attributes[attr_name] = parsed_value
 			else:
 				new_attributes[attr_name] = value
 		
@@ -436,6 +488,10 @@ func add_arc_if_possible(node_from: String, node_to: String):
 			print("Created arc %s:" % arc_name, arcs[arc_name])
 			return true
 	return false
+
+func remove_arc_if_possible(node_from: String, node_to: String):
+	# TODO
+	print("remove arc if possible: ", node_from, " -> ", node_to)
 
 func find_angle_path(start: Vector2i, end: Vector2i):
 	var path = [start]
@@ -494,7 +550,8 @@ func clear_arcs():
 	for child in arcs_tilemaps.get_children():
 		if child is TileMapLayer:
 			child.clear()
-	
+
+# ---
 
 func _ready():
 	print("Ready")
@@ -513,7 +570,7 @@ func _ready():
 	# TODO : save dicts in json file to be able to save game progression
 	load_tilemaps_from_tile_dicts()
 
-enum State { IDLE, CREATE_ARC, CREATE_BUILDING }
+enum State { IDLE, CREATE_ARC, CREATE_BUILDING, REMOVE_BUILDING, REMOVE_ARC }
 var show_arcs = false
 var current_state = { "type": State.IDLE }
 var hovered_cell = null
@@ -529,11 +586,14 @@ func _input(event):
 			if new_hovered_cell in tile_nodes:
 				for tile in nodes[tile_nodes[new_hovered_cell]]["tiles"]:
 					OVERLAY_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(tiles[tile]))
+			if new_hovered_cell in terrain_tile_nodes and terrain_tile_nodes[new_hovered_cell].split("_")[0] == "catchment":
+				OVERLAY_TILEMAP.set_cell(new_hovered_cell, 0, tileset.get_atlas_coords(terrain_tiles[new_hovered_cell]))
 		
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			if new_hovered_cell in tile_nodes:
 				open_node_editor(tile_nodes[new_hovered_cell])
-		
+			elif new_hovered_cell in terrain_tile_nodes and terrain_tile_nodes[new_hovered_cell].split("_")[0] == "catchment":
+				open_node_editor(terrain_tile_nodes[new_hovered_cell])
 	
 	if current_state["type"] == State.CREATE_BUILDING:
 		# The terrain is available if there is no building on the terrain and the terrain is not a river
@@ -569,8 +629,21 @@ func _input(event):
 			add_building(new_hovered_cell, current_state["attributes"]["tile_name"])
 			current_state = { "type": State.IDLE }
 			OVERLAY_TILEMAP.clear()
-
-	if current_state["type"] == State.CREATE_ARC:
+	
+	if current_state["type"] == State.REMOVE_BUILDING:
+		# Overlay over hovered buildings and catchments
+		if not (new_hovered_cell == hovered_cell):
+			OVERLAY_TILEMAP.clear()
+			if new_hovered_cell in tile_nodes:
+				for tile in nodes[tile_nodes[new_hovered_cell]]["tiles"]:
+					OVERLAY_TILEMAP.set_cell(tile, 0, tileset.get_atlas_coords(tiles[tile]))
+		# Handle click
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			if new_hovered_cell in tile_nodes:
+				remove_node(tile_nodes[new_hovered_cell])
+			current_state = { "type": State.IDLE }
+	
+	if current_state["type"] in [State.CREATE_ARC, State.REMOVE_ARC]:
 		# Overlay over hovered buildings
 		if not (new_hovered_cell == hovered_cell):
 			OVERLAY_TILEMAP.clear()
@@ -590,21 +663,17 @@ func _input(event):
 				elif current_state["attributes"]["to"] == null: # second click
 					current_state["attributes"]["to"] = tile_nodes[new_hovered_cell]
 			if current_state["attributes"]["from"] != null and current_state["attributes"]["to"] != null:
-				add_arc_if_possible(current_state["attributes"]["from"], current_state["attributes"]["to"])
+				match current_state["type"]:
+					State.CREATE_ARC:
+						add_arc_if_possible(current_state["attributes"]["from"], current_state["attributes"]["to"])
+					State.REMOVE_ARC:
+						remove_arc_if_possible(current_state["attributes"]["from"], current_state["attributes"]["to"])
 				if show_arcs:
 					display_arcs()
 				current_state = { "type": State.IDLE }
 				OVERLAY_TILEMAP.clear()
+	
 	hovered_cell = new_hovered_cell
-
-func _on_create_arc_pressed() -> void:
-	current_state = {
-		"type": State.CREATE_ARC,
-		"attributes": {
-			"from": null,
-			"to": null
-		}
-	}
 
 func _on_fwtw_main_pressed() -> void:
 	current_state = {
@@ -630,6 +699,11 @@ func _on_residential_1_pressed() -> void:
 		"attributes": { "tile_name": "residential_1" }
 	}
 
+func _on_remove_building_pressed() -> void:
+	current_state = {
+		"type": State.REMOVE_BUILDING
+	}
+
 func _on_show_arcs_toggled(toggled_on: bool) -> void:
 	show_arcs = toggled_on
 	if show_arcs:
@@ -637,44 +711,63 @@ func _on_show_arcs_toggled(toggled_on: bool) -> void:
 	else:
 		clear_arcs()
 
+func _on_create_arc_pressed() -> void:
+	current_state = {
+		"type": State.CREATE_ARC,
+		"attributes": {
+			"from": null,
+			"to": null
+		}
+	}
+
+func _on_remove_arc_pressed() -> void:
+	current_state = {
+		"type": State.REMOVE_ARC,
+		"attributes": {
+			"from": null,
+			"to": null
+		}
+	}
+
 func _on_sewer_settings_pressed() -> void:
 	open_node_editor("sewer")
 
-func _on_impervious_land_settings_pressed() -> void:
-	open_node_editor("urbanLand")
+func _on_land_settings_pressed() -> void:
+	open_node_editor("land")
 
-func _on_pervious_land_settings_pressed() -> void:
-	open_node_editor("ruralLand")
+func wait(seconds: float) -> void:
+	await get_tree().create_timer(seconds).timeout
 
 func _on_run_simulation_pressed() -> void:
-	#var data_json = JSON.stringify({"nodes": nodes, "arcs": arcs})
-#
-	#var file = FileAccess.open("user://data.json", FileAccess.WRITE)
-#
-	#if file != null:
-		#file.store_string(data_json)
-		#file = null  # Explicitly close the file
-	#else:
-		#print("Error opening file for writing")
-		#return
-#
-	## Wait a bit to ensure file is written
-	#await get_tree().process_frame
-#
-	## Now execute the Python script
-	#var json_file = OS.get_user_data_dir() + "/data.json"
-	#var output_image = OS.get_user_data_dir() + "/plot.png"
-	#var python_script = ProjectSettings.globalize_path("res://scripts/process_data.py")
-#
-	#var output = []
-	#var exit_code = OS.execute("python", [python_script, json_file, output_image], output)
-#
-	#if exit_code != 0:
-		#print("Error generating plot: ", output)
-		#return
-	#
-	#print("Plot generated successfully")
-	#
+	print("Run simulation")
+	var initial_run_simulation_button_text = run_simulation_button.text
+	run_simulation_button.text = "..."
+	await wait(1e-3) # wait a bit to let the button change its text
+	
+	var save_filepath = save_game("simulations_input")
+	# Wait a bit to ensure file is written
+	await get_tree().process_frame
+	
+	var save_filepath_absolute = ProjectSettings.globalize_path(save_filepath)
+	var output_dir = ProjectSettings.globalize_path("user://outputs/%s" % save_filepath.get_file().get_slice(".",0))
+	var python_script = ProjectSettings.globalize_path("res://scripts/python/run_simulation.py")
+	
+	var logs = []
+	var exit_code = OS.execute("python", [python_script, save_filepath_absolute, output_dir], logs)
+	
+	print(logs)
+	
+	# TODO : Error/warning messages
+	# nowhere for sludge to go -> means arc is missing between fwtw and wwtw
+	
+	if exit_code != 0:
+		print("Failed to run the python simulation script: ", logs)
+		return
+	
+	print("Success")
+	
+	run_simulation_button.text = initial_run_simulation_button_text
+
 	#var image = Image.new()
 	#var error = image.load(output_image)
 	#
