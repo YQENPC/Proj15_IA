@@ -1,75 +1,10 @@
-# %% [markdown]
-# # WSIMOD model demonstration - Paris case study (.py)
-# # Adapted from the paris case study [docs/demo/scripts](https://github.com/barneydobson/wsi/blob/main/docs/demo/scripts/paris_demo.py)
-#
-# 1. [Introduction](#we-will-cover-a-demo-wsimod-case-study)
-#
-# 2. [Data](#imports-and-forcing-data)
-#
-# 3. [Nodes](#create-nodes)
-#
-#     3.1 [Freshwater Treatment Works](#freshwater-treatment-works)
-#
-#     3.2 [Land](#land)
-#
-#     3.3 [Demand](#residential-demand)
-#
-#     3.4 [Reservoir](#reservoir)
-#
-#     3.5 [Distribution](#distribution)
-#
-#     3.6 [Wastewater Treatment Works](#wastewater-treatment-works)
-#
-#     3.7 [Sewers](#sewers)
-#
-#     3.8 [Groundwater](#groundwater)
-#
-#     3.9 [Node list](#create-a-nodelist)
-#
-# 4. [Arcs](#arcs)
-#
-#     4.1 [Arc parameters](#arc-parameters)
-#
-#     4.2 [Create the arcs](#create-arcs)
-#
-# 5. [Mapping](#mapping)
-#
-# 6. [Orchestration](#orchestration)
-#
-#     6.1 [Orchestrating an individual timestep](#orchestrating-an-individual-timestep)
-#
-#     6.2 [Ending a timestep](#ending-to-timestep)
-#
-# 7. [Model object](#model-object)
-#
-#     7.1 [Validation](#validation-plots)
-# %% [markdown]
-# ## We will cover a demo WSIMOD case study
-#
-# The glamorous town of paris will be our demo case study.
-# Below, we will create these nodes and arcs, orchestrate them into a model, and run simulations.
-#
-# ![alt text](./../images/paris.svg)
-#
-# Although GIS is pretty, the schematic below is a more accurate representation of what will be created.
-# WSIMOD treats everything as a node or an arc.
-#
-# ![alt text](./../images/schematic.svg)
-#
-
-# %% [markdown]
-# ## Imports and forcing data
-
-# %% [markdown]
-# Import packages
-# %%
-
-import os
-
+#%%
 import pandas as pd
-
-from wsimod.arcs.arcs import Arc
+import numpy as np
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 from wsimod.core import constants
+from wsimod.arcs.arcs import Arc
 from wsimod.nodes.catchment import Catchment
 from wsimod.nodes.demand import ResidentialDemand
 from wsimod.nodes.land import Land
@@ -80,32 +15,31 @@ from wsimod.nodes.waste import Waste
 from wsimod.nodes.wtw import FWTW, WWTW
 from wsimod.orchestration.model import Model
 
-os.environ["USE_PYGEOS"] = "0"
-import geopandas as gpd
-from matplotlib import pyplot as plt
-from shapely.geometry import LineString
-
-# %% [markdown]
-# Load input data
-# %%
-# unit for the input data is as follows:
-# flow: m3/s
-# precipitation: mm/day
-# et0: mm/day
-# temperature: degree C
-# Select the root path for the data folder. Use the appropriate value for your case.
-data_folder = os.path.join(os.path.abspath("./../../../"), "docs", "demo", "data_paris")
-
-input_fid = os.path.join(data_folder, "processed", "timeseries_data_paris.csv")
-input_data = pd.read_csv(input_fid, sep=";")
+constants.POLLUTANTS = ["temperature", "nitrate"]
+constants.NON_ADDITIVE_POLLUTANTS = ["temperature"]
+constants.ADDITIVE_POLLUTANTS = ["nitrate"]
+constants.FLOAT_ACCURACY = 1e-9
+constants.POLLUTANTS
 
 #%%
+# Data source (dates range: 2021-2025)
+# - Seine's flow: Hydroportail, station F700000103 (Paris, Austerlitz), daily mean flow
+#   (https://hydro.eaufrance.fr/stationhydro/F700000103/series)
+# - Seine's temperature and nitrate concentration: Hub'eau, river water quality API, station 03081000 (Paris, 12th arrondissement)
+#   (https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/analyse_pc.csv?code_departement=75&code_parametre=1301%2C1340%2C1350%2C1337&code_station=03081000&date_debut_prelevement=2021-01-01&date_fin_maj=2025-12-31&size=20000&sort=desc)
+# - Land's temperature: Open-Meteo.org, coordinates 48.822495,2.2881355 (Paris), timezone GMT+2
+#   (https://open-meteo.com/en/docs/historical-weather-api?start_date=2021-01-01&end_date=2025-12-31&timezone=Europe%2FBerlin&latitude=48.8534&longitude=2.3488&hourly=&daily=temperature_2m_mean,et0_fao_evapotranspiration,precipitation_sum)
+input_data = pd.read_csv("./data_v2/processed/processed_data.csv")
 
-
-input_data = input_data.loc[input_data.variable.isin(["flow", "precipitation", "et0", "temperature"])]
+input_data = input_data.loc[input_data.variable.isin(["flow", "precipitation", "et0", "temperature", "nitrate"])]
 input_data.loc[input_data.variable == "flow", "value"] *= constants.M3_S_TO_M3_DT
 input_data.loc[input_data.variable == "precipitation", "value"] *= constants.MM_TO_M
 input_data.loc[input_data.variable == "et0", "value"] *= constants.MM_TO_M
+input_data.loc[input_data.variable == "nitrate", "value"] *= constants.MG_L_TO_KG_M3
+
+# Une des valeurs est un peu aberrante par rapport aux autres, on la retire
+input_data = input_data[(input_data.variable != "nitrate") | (input_data.value < 0.040)] 
+
 input_data.date = pd.to_datetime(input_data.date)
 data_input_dict = input_data.set_index(["variable", "date"]).value.to_dict()
 data_input_dict = (
@@ -113,668 +47,266 @@ data_input_dict = (
     .apply(lambda x: x.set_index(["variable", "date"]).value.to_dict())
     .to_dict()
 )
-print(input_data.sample(10))
-# %% [markdown]
+print(pd.concat([input_data.head(5), input_data.sample(10), input_data.tail(5)]))
 
-# %% [markdown]
-# We select dates that are available in the input data
-
-# %%
-
-
-dates = input_data.date.unique()
+# Only keep the dates for which we have a value for each variable
+dates = input_data.loc[input_data.variable == "precipitation", "date"]
+for variable in ["flow", "et0", "nitrate", "temperature"]:# get common measure times across all stations
+    dates = pd.merge(dates, input_data.loc[input_data.variable == variable, "date"], how='inner', on=['date']).date
+dates = dates.unique()
 dates = dates[dates.argsort()]
-dates = [pd.Timestamp(x) for x in dates]
-print(dates[0:10])
-# %% [markdown]
-# We can specify the pollutants.
-# In this example we choose based on what pollutants we have input data for.
-# %%
+dates = [pd.Timestamp(t) for t in dates]
+print(dates[1:5])
 
+# def fill_missing_dates(dates_list, input_dict, parameter="temperature", n_harmonics=3, noise_std=1):
+#     """Fill missing dates using Fourier series fit."""
+    
+#     # Extract existing data points
+#     existing_dates = []
+#     existing_values = []
 
-constants.POLLUTANTS = ["temperature"]
-constants.NON_ADDITIVE_POLLUTANTS = ["temperature"]
-constants.ADDITIVE_POLLUTANTS = []
-constants.FLOAT_ACCURACY = 1e-11
-print(constants.POLLUTANTS)
+#     for date in dates_list:
+#         key = (parameter, date)
+#         if key in input_dict:
+#             existing_dates.append(date)
+#             existing_values.append(input_dict[key])
+    
+#     # Convert to numeric (days since start)
+#     existing_numeric = np.array([(d - existing_dates[0]).days for d in existing_dates])
+#     existing_values = np.array(existing_values)
+#     time_span = existing_numeric[-1] - existing_numeric[0]
+    
+#     # Define Fourier series function
+#     def fourier_series(t, *coeffs):
+#         # coeffs = [mean, amp1, phase1, amp2, phase2, ...]
+#         result = coeffs[0]  # mean value
+#         for i in range(n_harmonics):
+#             amp = coeffs[1 + 2*i]
+#             phase = coeffs[1 + 2*i + 1]
+#             # Use harmonics at 1x, 2x, 3x... the fundamental frequency
+#             result += amp * np.sin(2 * np.pi * (i+1) * t / time_span + phase)
+#         return result
+    
+#     # Initial guess for parameters
+#     p0 = [np.mean(existing_values)] + [1, 0] * n_harmonics
+    
+#     # Fit the Fourier series
+#     try:
+#         popt, _ = curve_fit(fourier_series, existing_numeric, existing_values, p0=p0, maxfev=10000)
+#     except RuntimeError as e:
+#         print(f"Fitting failed: {e}. Try reducing n_harmonics.")
+#         return input_dict
+    
+#     # Fill missing dates
+#     for date in dates_list:
+#         key = (parameter, date)
+#         if key not in input_dict:
+#             date_numeric = (date - existing_dates[0]).days
+#             interpolated_value = fourier_series(date_numeric, *popt)
+#             noise = np.random.normal(loc=0, scale=noise_std)
+#             input_dict[key] = float(interpolated_value + noise)
 
+# fill_missing_dates(dates, data_input_dict["seine"], parameter="temperature", n_harmonics=8, noise_std=0.2)
+# fill_missing_dates(dates, data_input_dict["seine"], parameter="nitrate", n_harmonics=8, noise_std=5e-4)
 
-# %% [markdown]
-# ## Create nodes
+#%%
+# Plot precipitations, nitrate and temperatures
 
-# %% [markdown]
-# For [waste nodes](./../../../reference-other/#wsimod.nodes.waste.Waste),
-# no parameters are needed, they are just the model outlet
-# %%
-downstream_outlet = Waste(name="downstream_outlet")
+fig, ax = plt.subplots(3, sharex=True, figsize=(10,5))
 
-# %% [markdown]
-# For junctions and abstraction locations, we can simply use the default
-# [nodes](./../../../reference-nodes/#wsimod.nodes.nodes)
-# %%
+precipitations = []
+for date in dates:
+    precipitations.append(data_input_dict["paris_land"][("precipitation", date)])
+ax[0].bar(dates, precipitations, 5,color="blue", label="Précipitations (mm)")
+ax[0].set_title("Daily precipitation")
+ax[0].legend()
+ax[0].xaxis_date()
+
+seine_nitrates = []
+for date in dates:
+    seine_nitrates.append(data_input_dict["seine"][("nitrate", date)])
+ax[1].plot(dates, seine_nitrates, marker = ".", linewidth=1, color="green", label="Nitrate (mg(NO3)/L)")
+ax[1].set_title("Nitrate concentration")
+ax[1].legend()
+
+seine_temperatures = []
+paris_land_temperatures = []
+for date in dates:
+    seine_temperatures.append(data_input_dict["seine"][("temperature", date)])
+    paris_land_temperatures.append(data_input_dict["paris_land"][("temperature", date)])
+
+ax[2].plot(dates, paris_land_temperatures, marker = ".", linewidth=1, color="orange", label="Land's temperature")
+ax[2].plot(dates, seine_temperatures, marker=".", linewidth=1, color="red", label="Seine's temperature", zorder=2)
+ax[2].set_title("Temperature")
+
+fig.suptitle("Input variables on model's dates")
+plt.legend()
+plt.show()
+
+#%%
 abstraction = Node(name="abstraction")
-water_intake = Node(name="water_intake_seine")
 downstream_mixer = Node(name="downstream_mixer")
-# %% [markdown]
-# For [catchment nodes](./../../../reference-other/#wsimod.nodes.catchment.Catchment),
-# we only need to specify the input data (as a dictionary format).
-# %%
-seine_upstream = Catchment(name="river", data_input_dict=data_input_dict["river"])
+seine_upstream = Catchment(name="river", data_input_dict=data_input_dict["seine"])
 
-# %% [markdown]
-# We can see that, even though we provided mimimal information (name and input data) each node comes with many predefined functions.
-# %%
-print(dir(seine_upstream))
+# FWTW parameters estimated by computing the sum of the capacities of Paris's main reservoirs and FWTW stations
+# FWTW Stations:
+# - Joinville: 300 000 m³/d
+# - Orly: 300 000 m³/d
+# - L'Häy-les-Roses: 145 000 m³/d
+# - Saint-Cloud: 100 000 m³/d
+# - Arcueil: 150 000 m³/d
+# (NB. There are two other stations further upstream, in Longueville and in Sorques, with each a treatment throughput capacity of 50 000 m³/d. 
+# Their production is then sent to the Arcueil station through two aqueducts: aqueduct of the Voulzie for the Longueville station, aqueduct of 
+# the Loing for the Sorques station. We thus don't take them into account.)
+# (Sources: https://https://www.eaudeparis.fr/distribuer-leau, https://www.youtube.com/watch?v=Rel9EGOmqNI)
+# Freswhater reservoirs:
+# - Lilas and Ménilmontant (receive the water from the Joinville station): respectively 208 000 m³ and 95 000 m³
+# - L'Häy-les-Roses (receives the water from the Orly and L'Häy-les-Roses stations): 203 000 m³
+# - Saint-Cloud (receives the water from the Saint-Cloud station): 426 000 m³
+# - Montsouris (receives the water from the Arcueil station): 200 000 m³
+# (Sources: https://www.eaudeparis.fr/des-reservoirs-pour-stocker-leau, http://keblo1515.free.fr/souterrinterdit/reservoirs.htm)
+# Storage area estimated by assuming the reservoirs are around 25m heigh.
 
-# %% [markdown]
-# ### Freshwater treatment works
-# Each type of node uses different parameters (see [API reference](./../../../../reference)).
-# Below we create a [freshwater treatment works (FWTW)](./../../../reference-wtw/#wsimod.nodes.wtw.FWTW)
-
-# %%
-# TODO: change this to Paris FWTW parameters when you have them
 paris_fwtw = FWTW(
-    service_reservoir_storage_capacity=1e5,
-    service_reservoir_storage_area=2e4,
-    treatment_throughput_capacity=4.5e4,
+    service_reservoir_storage_capacity=1.1e6,
+    service_reservoir_storage_area=6e4,
+    service_reservoir_initial_storage=1e6,
+    treatment_throughput_capacity=1e6,
     name="paris_fwtw",
 )
 
-# %% [markdown]
-# Each node type has different types of functionality available
-# %%
-
-print(dir(paris_fwtw))
-
-# %% [markdown]
-# The FWTW node has a tank representing the service reservoirs, we can see that it has been initialised empty.
-
-# %%
-
-print(paris_fwtw.service_reservoir_tank.storage)
-
-# %% [markdown]
-# If we try to pull water from the FWTW, it responds that there is no water to pull.
-
-# %%
-
-print(paris_fwtw.pull_check({"volume": 10}))
-
-# %% [markdown]
-# If we add in some water, we see the pull check responds that water is available.
-
-# %%
-
-paris_fwtw.service_reservoir_tank.storage["volume"] += 25
-print(paris_fwtw.pull_check({"volume": 10}))
-
-# %% [markdown]
-# When we set a pull request, we see that we successfully receive the water and the tank is updated.
-
-# %%
-
-
-reply = paris_fwtw.pull_set({"volume": 10})
-print(reply)
-print(paris_fwtw.service_reservoir_tank.storage)
-
-# %% [markdown]
-# ### Land
-# We will now create a [land node](./../../../reference-land/#wsimod.nodes.land.Land),
-# it is a bit involved so you might want to skip ahead to [demand](#Residential-demand),
-# or check out the [land node tutorial](./../land_demo)
-# %% [markdown]
-# Data inputs are a single dictionary
-
-# %%
-
 land_inputs = data_input_dict["paris_land"]
 
-# %% [markdown]
-# Plot land inputs (precipitation, et0, temperature), the model takes units of m or deg C
-# %%
-fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
-for i, var in enumerate(["precipitation", "et0", "temperature"]):
-    var_data = input_data[(input_data.site == "paris_land") & (input_data.variable == var)]
-    axes[i].plot(var_data.date, var_data.value)
-    axes[i].set_title(var)
-    axes[i].set_ylabel("Value")
-    axes[i].grid(True, linestyle='--', alpha=0.7)
-    axes[i].tick_params(axis='x', rotation=45)
-plt.tight_layout()
-plt.show()
-# %% [markdown]
-# Create two surfaces as a list of dicts
-# TODO: change to real Paris land parameters
-# %%
-surface = [
-    {
-        "type_": "PerviousSurface",
-        "area": 2e7,    # unit in m2
-        "surface": "rural",
-        "field_capacity": 0.3,
-        "depth": 0.5,
-        "initial_storage": 2e7 * 0.3 * 0.5,
-    },
-    {
-        "type_": "ImperviousSurface",
-        "area": 1e8,
-        "surface": "urban",
-        "initial_storage": 5e7,
-    },
-]
 
+# Nitrate deposition: order of magnitude of around 2e3 mg/m² of wet deposition (measured in the Netherlands)
+# (Source: https://www-sciencedirect-com.extranet.enpc.fr/science/article/pii/S1352231011003864)
+# However, using this value leads to aberrant results (more than 1 kgNO₃/m³ in the WWTW outlet).
+# so using the value of the WSIMOD demo instead
 
-# %% [markdown]
-# Create the land node from these surfaces and the input data
-# %%
-paris_land = Land(surfaces=surface, name="paris_land", data_input_dict=land_inputs)
+pollutant_deposition = {
+    "nitrate": 2e-9
+}
 
-# %% [markdown]
-# We can see the land node has various tanks that have been initialised empty
+# Areas estimated using https://atlas.co/tools/area-calculator/
+# - Pervious surface: Bois de Vincennes & Bois de Boulogne (area of gardens is negligible: ~10⁶ m²), around 1.8 x 10⁸ m²
+# - Impervious surface: rest of Paris, around 8 x 10⁸ m²
+paris_land = Land(
+    surfaces=[
+        {
+            "type_": "PerviousSurface",
+            "area": 1.8e8, # 1.8m²
+            "pollutant_load": pollutant_deposition,
+            "surface": "rural",
+            "initial_storage": 1.8e8 * 0.1 * 0.5, # default field capacity: 0.1 / default depth: 0.5m
+        },
+        {
+            "type_": "ImperviousSurface",
+            "area": 8e8,
+            "pollutant_load": pollutant_deposition,
+            "surface": "urban",
+            "initial_storage": 8e8 * 0.05, # height of the ponding area * area
+        },
+    ], 
+    data_input_dict=land_inputs,
+    name="paris_land"
+)
 
-# %%
-
-print(paris_land.surface_runoff.storage)
-print(paris_land.subsurface_runoff.storage)
-print(paris_land.percolation.storage)
-# %% [markdown]
-# We can see the surfaces have also been initialised, although they are not empty because we provided 'initial_storage' parameters.
-
-# %%
-rural_surface = paris_land.get_surface("rural")
-urban_surface = paris_land.get_surface("urban")
-print("{0}-{1}".format("rural", rural_surface.storage))
-print("{0}-{1}".format("urban", urban_surface.storage))
-
-
+# Demand
+# Population and per capita consumption found in "Ville de Paris, Rapport annuel 2024 sur le prix et la qualité du service public d'eau potable et d'assainissement"
+# (https://cdn.paris.fr/paris/2025/11/28/rpqs-eau-2024-v4-GLFg.pdf)
+# Nitrate load per capita: using the value of the WSIMOD Oxford demo since we couldn't find any other value elsewhere,
+# except that the concentration of nitrates in the inlet of wastewater treatment stations is around 1 mg/L, vs. ~20-40 mg/L in 
+# the outlet, after the nitrification process (ammonia -> nitrate)
+# (Source: https://www.deswater.com/DWT_articles/vol_65_papers/65_2017_192.pdf)
 
 paris = ResidentialDemand(
     name="paris",
     population=2.1e6,
-    per_capita=0.15,
+    per_capita=0.12,
     pollutant_load={
         "temperature": 14,
+        "nitrate": 150 * constants.MG_L_TO_KG_M3 * 0.12 # 150 mg/L
     },
     data_input_dict=land_inputs,
 )
-
-# %% [markdown]
-# We can run a timestep of the land node with the 'run' command
-
-# %%
-paris_land.t = pd.to_datetime("2022-12-22")
-
-paris_land.run()
-
-# %% [markdown]
-# We can see that the land and surface tanks have been updated
-
-# %%
-print(paris_land.surface_runoff.storage)
-print(paris_land.subsurface_runoff.storage)
-print(paris_land.percolation.storage)
-
-print("{0}-{1}".format("rural", rural_surface.storage))
-print("{0}-{1}".format("urban", urban_surface.storage))
-
-# %% [markdown]
-# ### Residential demand
-# The [residential demand](./../../../reference-other/#wsimod.nodes.demand.ResidentialDemand)
-# node requires population, per capita demand and a pollutant_load dictionary that defines
-# how much (weight in kg) pollution is generated per person per day.
-
-# %%
-paris = ResidentialDemand(
-    name="paris",
-    population=2e5,
-    per_capita=0.15,
-    pollutant_load={
-        "temperature": 14,
-    },
-    data_input_dict=land_inputs,
-)
-# pollutant_load calculated based on expected effluent at WWTW
-
-
-# %% [markdown]
-# ### Reservoir
-# A [reservoir node](./../../../reference-storage/#wsimod.nodes.storage.Reservoir)
-# is used to make abstractions from rivers and supply FWTWs
-
-# %%
-# TODO: need to change these parameters to match the Paris reservoir
-paris_reservoir = Reservoir(
-    name="paris_reservoir", capacity=1e7, initial_storage=1e7, area=1.5e6, datum=62
-)
-
-# %% [markdown]
-# ### Distribution
-# We use a generic [Node](./../../../reference-nodes/#wsimod.nodes.nodes.Node) as a junction to represent the distribution network between the FWTW and households
-
-# %%
 
 distribution = Node(name="paris_distribution")
 
-# %% [markdown]
-# ### Wastewater treatment works
-# [Wastewater treatment works (WWTW)](./../../../reference-wtw/#wsimod.nodes.wtw.WWTW)
-# are nodes that can store sewage water temporarily in storm tanks, and reduce the pollution
-# amounts in water before releasing them onwards to rivers.
+# SIAAP network: 480 km of emissaries with a diameter of 2.5-6m.
+# (Source: https://www.siaap.fr/metiers/transporter-stocker-et-gerer/)
+# Estimating the capacity: 480 000 * (3m/2) * π = 2.2e6 m³ (using half this value since the SIAAP covers a far greater area than Paris itself.)
 
-# %%
-# TODO: change these parameters to match the Paris WWTW
+combined_sewer = Sewer(capacity=1e6, name="combined_sewer")
+
+# SIAAP network: stormwater storage capacity of 990 000 m³ (using half this value since the SIAAP covers a far greater area than Paris itself.)
+# (Source: https://www.siaap.fr/metier# s/transporter-stocker-et-gerer/)
+# Storage area estimated by assuming the reservoirs are around 25m heigh.
+# The throughput capacity was configured after running the model once to make it match the sum of residential wastewater and precipitation.
 paris_wwtw = WWTW(
-    stormwater_storage_capacity=2e4,
+    stormwater_storage_capacity=5e5,
     stormwater_storage_area=2e4,
-    treatment_throughput_capacity=5e4,
+    treatment_throughput_capacity=9e5,
     name="paris_wwtw",
 )
 
-# %% [markdown]
-# ### Sewers
-# [Sewer nodes](./../../../reference-sewer/#wsimod.nodes.sewer.Sewer) enable water to transition
-# between households and WWTWs, and between impervious surfaces and rivers or WWTWs.
-# They use a timearea diagram to represent travel time, which assigns a specified percentage
-# of water to take a specified duration to pass through the sewer node.
-# %%
-# TODO: change these parameters to match the Paris sewer system
-combined_sewer = Sewer(
-    capacity=4e6, pipe_timearea={0: 0.8, 1: 0.15, 2: 0.05}, name="combined_sewer"
-)
+# Capacity set by multiplying the area by a height of 10m (as in the WSIMOD Oxford demo)
+gw = Groundwater(capacity=9.8e9, area=9.8e8, name="gw", residence_time=20)
 
-# %% [markdown]
-# ### Groundwater
-# [Groundwater nodes](./../../../reference-storage/#wsimod.nodes.storage.Groundwater)
-# implement a simple residence time to determine baseflow
+downstream_outlet = Waste(name="downstream_outlet")
 
-# %%
-# TODO: change these parameters to match the Paris groundwater situation
-gw = Groundwater(capacity=3.2e9, area=3.2e8, name="gw", residence_time=20)
-
-
-# %% [markdown]
-# ### Create a nodelist
-# To keep all the nodes in one place, we put them into a list
-# %%
 nodelist = [
-    downstream_outlet,
     seine_upstream,
+    abstraction,
     paris,
-    distribution,
-    paris_reservoir,
     paris_fwtw,
     paris_wwtw,
     combined_sewer,
     paris_land,
     gw,
-    abstraction,
-    water_intake,
     downstream_mixer,
+    downstream_outlet,
 ]
 
-print(nodelist)
-
-# %% [markdown]
-# ## Arcs
-# [Arcs](./../../../reference-arc/#wsimod.arcs.arcs.Arc) link nodes.
-# An example arc is the link between a FWTW and the distribution node
-# %%
-
-# Standard simple arcs
-fwtw_to_distribution = Arc(
-    in_port=paris_fwtw, out_port=distribution, name="fwtw_to_distribution"
-)
-print(fwtw_to_distribution)
-
-# %% [markdown]
-# As with nodes, even though we only gave it a few parameters, the arc comes with a lot built in
-# %%
-print(dir(fwtw_to_distribution))
-
-# %% [markdown]
-# We can see that the arc links the two nodes
-# %%
-
-
-print(fwtw_to_distribution.in_port)
-
-
-# %%
-
-
-print(fwtw_to_distribution.out_port)
-
-# %% [markdown]
-# And that it has updated the nodes that it is connecting.
-# %%
-print(paris_fwtw.out_arcs)
-
-# %%
-print(distribution.in_arcs)
-
-# %% [markdown]
-# We use arcs to send checks and requests..
-# %%
-print(fwtw_to_distribution.send_pull_check({"volume": 20}))
-
-
-# %%
-reply = fwtw_to_distribution.send_pull_request({"volume": 20})
-print(reply)
-
-# %% [markdown]
-# They convey this information to the nodes that they connect to, which update their state variables
-# %%
-
-
-print(paris_fwtw.service_reservoir_tank.storage)
-
-# %% [markdown]
-# In turn, the arcs update their own state variables.
-# %%
-
-
-print(fwtw_to_distribution.flow_in)
-print(fwtw_to_distribution.flow_out)
-
-# %% [markdown]
-# ## Arc parameters
-# Besides the in/out ports and names, arcs can have a parameter for their capacity, to limit the flow that may pass through it each timestep.
-# A typical example would be on river abstractions to a reservoir
-# %%
-abstraction_to_reservoir = Arc(
-    in_port=abstraction,
-    out_port=paris_reservoir,
-    name="abstraction_to_reservoir",
-    capacity=5e4, # TODO: change this parameter to match the Paris abstraction capacity, currently =*10 of oxford
-)
-
-# %% [markdown]
-# A bit more sophisticated is the 'preference' parameter.
-# We use preference to express where we would prefer the model to send water.
-# In this example, the sewer can send water to both the treatment plant and directly into the river.
-# Of course we would always to prefer to send water to the plant, so we give it a very high preference.
-# Discharging into the river should only be done if there is no capacity left at the WWTW, so we give the arc a very low preference.
-# %%
-# TODO: change these parameters to match the Paris sewer system and WWTW capacity
-sewer_to_wwtw = Arc(
-    in_port=combined_sewer, out_port=paris_wwtw, preference=1e10, name="sewer_to_wwtw"
-)
-sewer_overflow = Arc(
-    in_port=combined_sewer,
-    out_port=downstream_mixer,
-    preference=1e-10,
-    name="sewer_overflow",
-)
-
-
-# %% [markdown]
-# ## Create arcs
-# Arcs are a bit less interesting than nodes because they generally don't capture complicated physical behaviours.
-# So we just create all of them below.
-# %%
-
-
-seine_upstream_to_intake = Arc(
-    in_port=seine_upstream, out_port=water_intake, name="seine_upstream_to_intake"
-)
-
-
-intake_to_abstraction = Arc(
-    in_port=water_intake, out_port=abstraction, name="intake_to_abstraction"
-)
-
-
-abstraction_to_mixer = Arc(
-    in_port=abstraction, out_port=downstream_mixer, name="abstraction_to_mixer"
-)
-
-wwtw_to_mixer = Arc(in_port=paris_wwtw, out_port=downstream_mixer, name="wwtw_to_mixer")
-
-mixer_to_waste = Arc(
-    in_port=downstream_mixer, out_port=downstream_outlet, name="mixer_to_waste"
-)
-
-distribution_to_demand = Arc(
-    in_port=distribution, out_port=paris, name="distribution_to_demand"
-)
-
-reservoir_to_fwtw = Arc(in_port=paris_reservoir, out_port=paris_fwtw, name="reservoir_to_fwtw")
-
-fwtw_to_sewer = Arc(in_port=paris_fwtw, out_port=combined_sewer, name="fwtw_to_sewer")
-
-demand_to_sewer = Arc(in_port=paris, out_port=combined_sewer, name="demand_to_sewer")
-
-land_to_sewer = Arc(in_port=paris_land, out_port=combined_sewer, name="land_to_sewer")
-
-land_to_gw = Arc(in_port=paris_land, out_port=gw, name="land_to_gw")
-
-garden_to_gw = Arc(in_port=paris, out_port=gw, name="garden_to_gw")
-
-gw_to_mixer = Arc(in_port=gw, out_port=downstream_mixer, name="gw_to_mixer")
-
-# %% [markdown]
-# Again, we keep all the arcs in a tidy list together.
-
-# %%
 arclist = [
-    seine_upstream_to_intake,
-    intake_to_abstraction,
-    abstraction_to_mixer,
-    wwtw_to_mixer,
-    sewer_overflow,
-    mixer_to_waste,
-    abstraction_to_reservoir,
-    distribution_to_demand,
-    demand_to_sewer,
-    land_to_sewer,
-    sewer_to_wwtw,
-    fwtw_to_sewer,
-    fwtw_to_distribution,
-    reservoir_to_fwtw,
-    land_to_gw,
-    garden_to_gw,
-    gw_to_mixer,
+    Arc(in_port=seine_upstream, out_port=abstraction, name="seine_upstream_to_intake"),
+    Arc(in_port=abstraction, out_port=downstream_mixer, name="abstraction_to_mixer"),
+    Arc(
+        in_port=abstraction,
+        out_port=paris_fwtw,
+        name="abstraction_to_reservoir",
+        capacity=5e5,
+    ),
+    Arc(in_port=paris_fwtw, out_port=paris, name="fwtw_to_demand"),
+    Arc(in_port=paris_fwtw, out_port=combined_sewer, name="fwtw_to_sewer"),
+    Arc(in_port=paris, out_port=combined_sewer, name="demand_to_sewer"),
+    Arc(in_port=paris_land, out_port=combined_sewer, name="land_to_sewer"),
+    Arc(in_port=paris_land, out_port=gw, name="land_to_gw"),
+    Arc(in_port=paris, out_port=gw, name="garden_to_gw"),
+    Arc(in_port=gw, out_port=downstream_mixer, name="gw_to_mixer"),
+    Arc(in_port=combined_sewer, out_port=paris_wwtw, preference=1e10, name="sewer_to_wwtw"),
+    Arc(
+        in_port=combined_sewer,
+        out_port=downstream_mixer,
+        preference=1e-10,
+        name="sewer_overflow",
+    ),
+    Arc(in_port=paris_wwtw, out_port=downstream_mixer, name="wwtw_to_mixer"),
+    Arc(in_port=downstream_mixer, out_port=downstream_outlet, name="mixer_to_waste")
 ]
-
-
-# %% [markdown]
-# ## Mapping
-# Remember, WSIMOD is an integrated model.
-# Because it covers so many different things, it is very easy to make mistakes.
-# Thus it is always good practice to plot your data!
-#
-# Below we load the node location data and create arcs from the information in the arclist.
-# %%
-# TODO: geojson file for Paris case
-# location_fn = os.path.join(data_folder, "raw", "points_locations.geojson")
-# nodes_gdf = gpd.read_file(location_fn).set_index("name")
-# arcs_gdf = []
-#
-# for arc in arclist:
-#     arcs_gdf.append(
-#         {
-#             "name": arc.name,
-#             "geometry": LineString(
-#                 [
-#                     nodes_gdf.loc[arc.in_port.name, "geometry"],
-#                     nodes_gdf.loc[arc.out_port.name, "geometry"],
-#                 ]
-#             ),
-#         }
-#     )
-#
-# arcs_gdf = gpd.GeoDataFrame(arcs_gdf, crs=nodes_gdf.crs)
-# %% [markdown]
-# Because we converted the information as GeoDataFrames, we can simply plot them below
-# %%
-
-# f, ax = plt.subplots()
-# arcs_gdf.plot(ax=ax)
-# nodes_gdf.plot(color="r", ax=ax, zorder=10)
-# plt.show()
-
-# %% [markdown]
-# ## Orchestration
-# Orchestration is making the simulation happen by calling functions in the nodes.
-# These functions simulate physical behaviour within the node, and cause pulls/pushes to happen which in turn triggers physical behaviour in other nodes.
-#
-# ### Orchestrating an individual timestep
-#
-# We will start below by manually orchestrating a single timestep.
-#
-# We start by setting the date, so that every node knows what forcing data to read for this timestep.
-
-# %%
-date = dates[0]
-
-for node in nodelist:
-    node.t = date
-
-print(date)
-print(paris_fwtw.t)
-
-# %% [markdown]
-# We can see the service reservoirs are empty but the supply reservoir is not!
-# %%
-
-print(paris_fwtw.service_reservoir_tank.storage)
-print(paris_reservoir.tank.storage)
-# %% [markdown]
-# If we call the FWTW's treat_water function it will pull water from the supply reservoir and update its service reservoirs
-# %%
-
-paris_fwtw.treat_water()
-
-print(paris_fwtw.service_reservoir_tank.storage)
-print(paris_reservoir.tank.storage)
-
-# %% [markdown]
-# This information is tracked in the arcs that enter the FWTW
-# %%
-
-
-print(paris_fwtw.in_arcs)
-
-
-# %%
-
-
-print(reservoir_to_fwtw.flow_in)
-print(reservoir_to_fwtw.flow_out)
-
-# %% [markdown]
-# Although none of that water has yet entered the distribution network (only some small flow from the earlier demonstration)
-# %%
-
-
-print(fwtw_to_distribution.flow_in)
-
-# %% [markdown]
-# That is because no water consumption demand had yet been generated.
-#
-# If we call the demand node's create_demand function we see that the distribution arc becomes utilised.
-# %%
-
-paris.create_demand()
-print(fwtw_to_distribution.flow_in)
-
-# %% [markdown]
-# We also see that this gets pushed onwards into the sewer system
-
-# %%
-print(demand_to_sewer.flow_in)
-
-
-# %% [markdown]
-# Many nodes have functions intended to be called during orchestration.
-# These functions are described in the documentation.
-# For example, we see in the [Land node](./../../../reference-land/#wsimod.nodes.land.Land) API reference that the 'run' function is intended to be called from orchestration.
-# %%
-paris_land.run()
-
-# %% [markdown]
-# Below we call the functions for other nodes
-# %%
-
-# Discharge GW
-gw.distribute()
-
-# Discharge sewers (pushed to other sewers or WWTW)
-combined_sewer.make_discharge()
-
-# Run WWTW model
-paris_wwtw.calculate_discharge()
-
-# Make abstractions
-paris_reservoir.make_abstractions()
-
-# Discharge WW
-paris_wwtw.make_discharge()
-
-# Route catchments
-seine_upstream.route()
-
-# %% [markdown]
-# ## Ending a timestep
-# Because mistakes happen, it is essential to carry out mass balance testing.
-# Each node has a mass balance function that can be called.
-# We see a mass balance violation resulting from the demonstration with the FWTW earlier.
-# %%
-
-for node in nodelist:
-    in_, ds_, out_ = node.node_mass_balance()
-
-
-# %% [markdown]
-# We should also call the end_timestep function in nodes and arcs.
-# This is important for mass balance testing and capturing the behaviour of some dynamic processes in nodes.
-
-# %%
-
-for node in nodelist:
-    node.end_timestep()
-
-for arc in arclist:
-    arc.end_timestep()
-
-# %% [markdown]
-# ## Model object
-# Of course it would be a massive pain to manually orchestrate every timestep.
-# So instead we store node and arc information in a [model object](./../../../reference-model/#wsimod.orchestration.model.Model)
-# that will do the orchestration for us.
-#
-# Because we have already created the nodes/arcs above, we simply need to add the instantiated lists above.
-
-# %%
 
 my_model = Model()
 my_model.add_instantiated_nodes(nodelist)
 my_model.add_instantiated_arcs(arclist)
 my_model.dates = dates
 
-# %% [markdown]
-# The model object lets us reinitialise the nodes/arcs, and run all of the orchestration with a 'run' function.
-# %%
+flows, tanks, _, surfaces = my_model.run()
 
-my_model.reinit()
-
-flows, _, _, _ = my_model.run()
-
-# %% [markdown]
-# The model outputs flows as a dictionary which can be converted to a dataframe
-# %%
-
+#%%
+# Plots arc flows
 flows = pd.DataFrame(flows)
+flows_plot = flows.copy()
+flows_plot["nitrate"] /= flows_plot.flow
 
-print(flows.sample(10))
-
-# %% [markdown]
-# ## Validation plots
-# Validation removed as pollutant data is not being simulated.
-# We will plot all the flow at the model outlet instead.
-# %%
 unique_arcs = flows['arc'].unique()
 num_arcs = len(unique_arcs)
 cols = 3
@@ -786,7 +318,7 @@ axes = axes.flatten()
 for i, arc_name in enumerate(unique_arcs):
     ax = axes[i]
     # filter data for this arc and set time as index for plotting
-    arc_data = flows.loc[flows['arc'] == arc_name, ["flow", "time"]].set_index("time")
+    arc_data = flows[flows['time'] > pd.to_datetime('2022-07-01')].loc[flows['arc'] == arc_name, ["flow", "time"]].set_index("time")
     ax.plot(arc_data.index, arc_data['flow'])
     ax.set_title(arc_name)
     ax.set_ylabel("Flow (m3/d)")
@@ -799,98 +331,282 @@ for i in range(num_arcs, len(axes)):
     axes[i].axis('off')
 
 plt.show()
-# %% [markdown]
-# ## Plotting all arcs and nodes 
-# the following code allows you to plot all the arcs and nodes in the model, 
-# when you add new nodes, it helps to understand if the flow paths are correct.
 
-# %%
-import networkx as nx
+fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows), constrained_layout=True)
+axes = axes.flatten()
 
-G = nx.DiGraph()
+for i, arc_name in enumerate(unique_arcs):
+    ax = axes[i]
+    # filter data for this arc and set time as index for plotting
+    arc_data = flows_plot[flows_plot['time'] > pd.to_datetime('2022-07-01')].loc[flows['arc'] == arc_name, ["nitrate", "time"]].set_index("time")
+    ax.plot(arc_data.index, arc_data['nitrate'])
+    ax.set_title(arc_name)
+    ax.set_ylabel("Nitrate (kg/m³)")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    # Rotate date labels for better readability
+    ax.tick_params(axis='x', rotation=45)
 
-# Define color palette based on node types from schematic.svg
-type_colors = {
-    'Catchment': '#ff99ff',
-    'Waste': '#e3e300',
-    'Node': '#33ff33',
-    'FWTW': '#33ffff',
-    'Land': '#009900',
-    'Demand': '#ffb570',
-    'ResidentialDemand': '#ffb570',
-    'Reservoir': '#7f00ff',
-    'WWTW': '#ff0080',
-    'Sewer': '#7ea6e0',
-    'Groundwater': '#ff0000'
-}
+# Turn off unused subplots
+for i in range(num_arcs, len(axes)):
+    axes[i].axis('off')
 
-# Define layers for left-to-right multipartite layout
-def get_layer(node):
-    node_type = type(node).__name__
-    name = node.name.lower()
-    if node_type == 'Catchment':
-        return 0
-    elif 'intake' in name or (node_type == 'Node' and 'distribution' not in name and 'mixer' not in name and 'abstraction' not in name):
-        return 1
-    elif 'abstraction' in name:
-        return 2
-    elif node_type == 'Reservoir' or 'distribution' in name:
-        return 3
-    elif node_type in ['FWTW', 'Demand', 'ResidentialDemand']:
-        return 4
-    elif node_type in ['Groundwater', 'Land']:
-        return 5
-    elif node_type in ['Sewer', 'WWTW']:
-        return 6
-    elif node_type == 'Waste' or 'mixer' in name:
-        return 7
-    return 1
-
-for node in nodelist:
-    node_type = type(node).__name__
-    color = type_colors.get(node_type, 'lightblue')
-    # Special case for abstraction nodes which are colored differently in the schematic
-    if 'abstraction' in node.name:
-        color = '#0000cc'
-    G.add_node(node.name, color=color, layer=get_layer(node))
-
-for arc in arclist:
-    G.add_edge(arc.in_port.name, arc.out_port.name, label=arc.name)
-
-node_colors = [nx.get_node_attributes(G, 'color')[node] for node in G.nodes()]
-
-plt.figure(figsize=(16, 10))
-# Use multipartite layout specifying the layer attribute
-pos = nx.multipartite_layout(G, subset_key="layer", align='vertical') 
-
-# Stagger the y-coordinates to prevent horizontal edges from crossing nodes
-layers = {}
-for node, data in G.nodes(data=True):
-    layer = data.get('layer', 0)
-    if layer not in layers:
-        layers[layer] = []
-    layers[layer].append(node)
-
-for layer, nodes in layers.items():
-    nodes.sort(key=lambda n: pos[n][1])  # Sort by existing vertical order
-    n = len(nodes)
-    for i, node in enumerate(nodes):
-        y_val = (i - (n - 1) / 2.0) * 2.0  # Spread out nodes vertically
-        
-        # Stagger based on odd/even layers, shifting by 0.5
-        if layer % 2 == 1:
-            y_val += 0.5
-            
-        pos[node] = (pos[node][0], y_val)
-
-nx.draw(G, pos, with_labels=True, node_color=node_colors, 
-        node_size=2500, font_size=10, font_weight='bold', 
-        arrows=True, edge_color='gray', arrowsize=20)
-
-edge_labels = nx.get_edge_attributes(G, 'label')
-nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
-plt.title("Model Node Linkages (Arcs)")
 plt.show()
 
-# %%
+#%%
+# Plot reservoirs' storage
+tanks = pd.DataFrame(tanks)
 
+unique_tanks = set(zip(tanks["node"], tanks["prop"]))
+
+num_tanks = len(unique_tanks)
+cols = 3
+rows = (num_tanks + cols - 1) // cols
+
+fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows), constrained_layout=True)
+axes = axes.flatten()
+
+for i, (node_name, prop) in enumerate(unique_tanks):
+    ax = axes[i]
+    # filter data for this arc and set time as index for plotting
+    tank_data = tanks[tanks['time'] > pd.to_datetime('2022-07-01')].loc[(tanks['node'] == node_name) & (tanks['prop'] == prop), ["storage", "time"]].set_index("time")
+    ax.plot(tank_data.index, tank_data['storage'])
+    ax.set_title(f"{node_name} / {prop}")
+    ax.set_ylabel("Storage (m³)")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    # Rotate date labels for better readability
+    ax.tick_params(axis='x', rotation=45)
+
+# Turn off unused subplots
+for i in range(num_tanks, len(axes)):
+    axes[i].axis('off')
+
+plt.show()
+
+#%%
+df_pollutants_validation = pd.read_csv("./data_v2/raw/pollutants_03082000_2021-2025.csv", sep=";")
+temperatures_validation = []
+nitrate_validation = []
+for _, row in df_pollutants_validation.iterrows():
+    date = row["date_prelevement"]
+    match row["libelle_parametre"]:
+        case "Température de l'Eau":
+            temperatures_validation.append((pd.to_datetime(date), row["resultat"]))
+        case "Nitrates":
+            nitrate_validation.append((pd.to_datetime(date), row["resultat"] * constants.MG_L_TO_KG_M3))
+        case _:
+            continue
+
+plt.title("Temperature (°C) (mixer_to_waste)")
+plt.plot(flows_plot.loc[flows_plot.arc == "mixer_to_waste", ["temperature", "time"]].set_index("time"), color="b", label="model")
+plt.scatter(*zip(*temperatures_validation), color="r", zorder=2, label="validation")
+plt.tick_params(axis='x', rotation=45)
+plt.legend()
+plt.show()
+
+plt.title("Nitrate (kg/m³) (mixer_to_waste)")
+plt.plot(flows_plot.loc[flows_plot.arc == "mixer_to_waste", ["nitrate", "time"]].set_index("time"), color="b", label="model")
+plt.scatter(*zip(*nitrate_validation), color="r", zorder=2, label="validation")
+plt.tick_params(axis='x', rotation=45)
+plt.legend()
+plt.show()
+
+#%%
+abstraction = Node(name="abstraction")
+downstream_mixer = Node(name="downstream_mixer")
+
+# Input data collected from hydro.eaufrance.fr (Austerlitz station - code F700000103) for the flows
+# and hubeau.eaufrance.fr (12th arrondissement station - code 03081000) for the water temperature and nitrate concentration
+seine_upstream = Catchment(name="river", data_input_dict=data_input_dict["seine"])
+
+# FWTW parameters estimated by computing the sum of the capacities of Paris's main reservoirs and FWTW stations
+# FWTW Stations:
+# - Joinville: 300 000 m³/d
+# - Orly: 300 000 m³/d
+# - L'Häy-les-Roses: 145 000 m³/d
+# - Saint-Cloud: 100 000 m³/d
+# - Arcueil: 150 000 m³/d
+# (NB. There are two other stations further upstream, in Longueville and in Sorques, with each a treatment throughput capacity of 50 000 m³/d. 
+# Their production is then sent to the Arcueil station through two aqueducts: aqueduct of the Voulzie for the Longueville station, aqueduct of 
+# the Loing for the Sorques station. We thus don't take them into account.)
+# (Sources: https://https://www.eaudeparis.fr/distribuer-leau, https://www.youtube.com/watch?v=Rel9EGOmqNI)
+# Freswhater reservoirs:
+# - Lilas and Ménilmontant (receive the water from the Joinville station): respectively 208 000 m³ and 95 000 m³
+# - L'Häy-les-Roses (receives the water from the Orly and L'Häy-les-Roses stations): 203 000 m³
+# - Saint-Cloud (receives the water from the Saint-Cloud station): 426 000 m³
+# - Montsouris (receives the water from the Arcueil station): 200 000 m³
+# (Sources: https://www.eaudeparis.fr/des-reservoirs-pour-stocker-leau, http://keblo1515.free.fr/souterrinterdit/reservoirs.htm)
+# Storage area estimated by assuming the reservoirs are around 25m heigh.
+
+paris_fwtw = FWTW(
+    service_reservoir_storage_capacity=1.1e6,
+    service_reservoir_storage_area=6e4,
+    service_reservoir_initial_storage=1e6,
+    treatment_throughput_capacity=1e6,
+    name="paris_fwtw",
+)
+
+land_inputs = data_input_dict["paris_land"]
+
+
+# Nitrate deposition: order of magnitude of around 2e3 mg/m² of wet deposition (measured in the Netherlands)
+# (Source: https://www-sciencedirect-com.extranet.enpc.fr/science/article/pii/S1352231011003864)
+# However, using this value leads to aberrant results (more than 1 kgNO₃/m³ in the WWTW outlet).
+# so using the value of the WSIMOD demo instead
+
+pollutant_deposition = {
+    "nitrate": 2e-9
+}
+
+# Areas estimated using https://atlas.co/tools/area-calculator/
+# - Pervious surface: Bois de Vincennes & Bois de Boulogne (area of gardens is negligible: ~10⁶ m²), around 1.8 x 10⁸ m²
+# - Impervious surface: rest of Paris, around 8 x 10⁸ m²
+paris_land = Land(
+    surfaces=[
+        {
+            "type_": "PerviousSurface",
+            "area": 1.8e8, # 1.8m²
+            "pollutant_load": pollutant_deposition,
+            "surface": "rural",
+            "initial_storage": 1.8e8 * 0.1 * 0.5, # default field capacity: 0.1 / default depth: 0.5m
+        },
+        {
+            "type_": "ImperviousSurface",
+            "area": 8e8,
+            "pollutant_load": pollutant_deposition,
+            "surface": "urban",
+            "initial_storage": 8e8 * 0.05, # height of the ponding area * area
+        },
+    ], 
+    data_input_dict=land_inputs,
+    name="paris_land"
+)
+
+# Demand
+# Population and per capita consumption found in "Ville de Paris, Rapport annuel 2024 sur le prix et la qualité du service public d'eau potable et d'assainissement"
+# (https://cdn.paris.fr/paris/2025/11/28/rpqs-eau-2024-v4-GLFg.pdf)
+# Nitrate load per capita: using the value of the WSIMOD Oxford demo since we couldn't find any other value elsewhere,
+# except that the concentration of nitrates in the inlet of wastewater treatment stations is around 1 mg/L, vs. ~20-40 mg/L in 
+# the outlet, after the nitrification process (ammonia -> nitrate)
+# (Source: https://www.deswater.com/DWT_articles/vol_65_papers/65_2017_192.pdf)
+
+paris = ResidentialDemand(
+    name="paris",
+    population=2.1e6,
+    per_capita=0.12,
+    pollutant_load={
+        "temperature": 14,
+        "nitrate": 150 * constants.MG_L_TO_KG_M3 * 0.12 # 150 mg/L
+    },
+    data_input_dict=land_inputs,
+)
+
+distribution = Node(name="paris_distribution")
+
+# SIAAP network: 480 km of emissaries with a diameter of 2.5-6m.
+# (Source: https://www.siaap.fr/metiers/transporter-stocker-et-gerer/)
+# Estimating the capacity: 480 000 * (3m/2) * π = 2.2e6 m³ (using half this value since the SIAAP covers a far greater area than Paris itself.)
+
+combined_sewer = Sewer(capacity=1e6, name="combined_sewer")
+
+# SIAAP network: stormwater storage capacity of 990 000 m³ (using half this value since the SIAAP covers a far greater area than Paris itself.)
+# (Source: https://www.siaap.fr/metier# s/transporter-stocker-et-gerer/)
+# Storage area estimated by assuming the reservoirs are around 25m heigh.
+# The throughput capacity was configured after running the model once to make it match the sum of residential wastewater and precipitation.
+paris_wwtw = WWTW(
+    stormwater_storage_capacity=1,
+    stormwater_storage_area=1,
+    treatment_throughput_capacity=1,
+    name="paris_wwtw",
+)
+
+# Capacity set by multiplying the area by a height of 10m (as in the WSIMOD Oxford demo)
+gw = Groundwater(capacity=9.8e9, area=9.8e8, name="gw", residence_time=20)
+
+downstream_outlet = Waste(name="downstream_outlet")
+
+nodelist = [
+    seine_upstream,
+    abstraction,
+    paris,
+    paris_fwtw,
+    paris_wwtw,
+    combined_sewer,
+    paris_land,
+    gw,
+    downstream_mixer,
+    downstream_outlet,
+]
+
+arclist = [
+    Arc(in_port=seine_upstream, out_port=abstraction, name="seine_upstream_to_intake"),
+    Arc(in_port=abstraction, out_port=downstream_mixer, name="abstraction_to_mixer"),
+    Arc(
+        in_port=abstraction,
+        out_port=paris_fwtw,
+        name="abstraction_to_reservoir",
+        capacity=5e5,
+    ),
+    Arc(in_port=paris_fwtw, out_port=paris, name="fwtw_to_demand"),
+    Arc(in_port=paris_fwtw, out_port=combined_sewer, name="fwtw_to_sewer"),
+    Arc(in_port=paris, out_port=combined_sewer, name="demand_to_sewer"),
+    Arc(in_port=paris_land, out_port=combined_sewer, name="land_to_sewer"),
+    Arc(in_port=paris_land, out_port=gw, name="land_to_gw"),
+    Arc(in_port=paris, out_port=gw, name="garden_to_gw"),
+    Arc(in_port=gw, out_port=downstream_mixer, name="gw_to_mixer"),
+    Arc(in_port=combined_sewer, out_port=paris_wwtw, preference=1e10, name="sewer_to_wwtw"),
+    Arc(
+        in_port=combined_sewer,
+        out_port=downstream_mixer,
+        preference=1e-10,
+        name="sewer_overflow",
+    ),
+    Arc(in_port=paris_wwtw, out_port=downstream_mixer, name="wwtw_to_mixer"),
+    Arc(in_port=downstream_mixer, out_port=downstream_outlet, name="mixer_to_waste")
+]
+
+my_model = Model()
+my_model.add_instantiated_nodes(nodelist)
+my_model.add_instantiated_arcs(arclist)
+my_model.dates = dates
+
+flows_without_wwtw, _, _, _ = my_model.run()
+
+#%%
+flows_with_wwtw = flows
+flows_with_wwtw_plot = flows_with_wwtw.copy()
+flows_with_wwtw_plot["nitrate"] /= flows_with_wwtw_plot.flow
+
+flows_without_wwtw = pd.DataFrame(flows_without_wwtw)
+flows_without_wwtw_plot = flows_without_wwtw.copy()
+flows_without_wwtw_plot["nitrate"] /= flows_without_wwtw_plot.flow
+
+df_pollutants_validation = pd.read_csv("./data_v2/raw/pollutants_03082000_2021-2025.csv", sep=";")
+nitrate_validation = []
+for _, row in df_pollutants_validation.iterrows():
+    date = row["date_prelevement"]
+    match row["libelle_parametre"]:
+        case "Nitrates":
+            nitrate_validation.append((pd.to_datetime(date), row["resultat"] * constants.MG_L_TO_KG_M3))
+        case _:
+            continue
+
+df_pollutants_input = pd.read_csv("./data_v2/raw/pollutants_03081000_2021-2025.csv", sep=";")
+nitrate_input = []
+for _, row in df_pollutants_input.iterrows():
+    date = row["date_prelevement"]
+    match row["libelle_parametre"]:
+        case "Nitrates":
+            nitrate_input.append((pd.to_datetime(date), row["resultat"] * constants.MG_L_TO_KG_M3))
+        case _:
+            continue
+
+plt.title("Nitrate (kg/m³)")
+plt.plot(flows_without_wwtw_plot.loc[flows_plot.arc == "mixer_to_waste", ["nitrate", "time"]].set_index("time"), label="downtream (model without wwtw)", linewidth=0.5, zorder=1)
+plt.plot(flows_with_wwtw_plot.loc[flows_plot.arc == "mixer_to_waste", ["nitrate", "time"]].set_index("time"), label="downtream (model with wwtw)", linewidth=0.5, zorder=2)
+plt.plot(flows_with_wwtw_plot.loc[flows_plot.arc == "seine_upstream_to_intake", ["nitrate", "time"]].set_index("time"), label="upstream (Austerlitz station)", linewidth=0.5, zorder=1, marker="x", color="black")
+plt.scatter(*zip(*nitrate_validation), zorder=3, label="downstream (Suresne station)", s=50, marker=".")
+
+plt.tick_params(axis='x', rotation=45)
+plt.ylim([0.010, 0.045])
+plt.legend()
+plt.show()
